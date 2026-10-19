@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Internal Team Operations Management">
+<meta name="theme-color" content="#1478D4">
+<link rel="icon" type="image/jpeg" href="zygal.jpeg">
+<title>ZYGAL | Team Operations</title>
+<link rel="stylesheet" href="style.css">
+<style>
+.field:has(#uDesignation){display:none}
+.asset-photo{width:48px;height:48px;display:block;object-fit:cover;border:1px solid var(--border);border-radius:8px}
+.sim-detail{display:flex;gap:22px;align-items:flex-start}.sim-detail-photo{width:150px;height:150px;object-fit:cover;border:1px solid var(--border);border-radius:10px;background:#f3f6fa}.sim-detail-empty{display:grid;place-items:center;color:var(--muted);font-size:12px}.sim-detail-fields{display:grid;gap:14px;min-width:220px}.sim-detail-fields span{display:block;color:var(--muted);font-size:11px}.sim-detail-fields b{display:block;margin-top:3px}
+#content>.three>.card:first-child{display:none}
+.list-row[data-page="materials"]{display:none}
+.today-summary{background:linear-gradient(135deg,#fff 0%,#f7fbff 100%)}
+.summary-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
+.summary-heading h3{margin:4px 0 0}
+.eyebrow,.summary-group-title{display:block;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.summary-total{display:grid;place-items:center;min-width:70px;min-height:58px;border:1px solid #cfe2f0;border-radius:10px;background:#edf7ff;color:var(--primary-dark);font-size:25px;font-weight:800;line-height:1}
+.summary-total small{display:block;margin-top:5px;color:var(--muted);font-size:10px;font-weight:600;white-space:nowrap}
+.summary-groups{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.summary-group-title{padding-bottom:6px;border-bottom:1px solid var(--border)}
+.summary-group .list-row{width:100%;padding:12px 2px;text-align:left}
+.summary-group .list-row span:first-child{display:grid;gap:3px}
+.summary-group .list-row b{font-size:12px;font-weight:700}
+.summary-group .list-row small{color:var(--muted);font-size:11px}
+.dashboard-project-picker{display:flex;align-items:center;gap:7px;white-space:nowrap}.dashboard-project-picker label{color:var(--muted);font-size:11px;font-weight:700}.dashboard-project-picker select{max-width:190px;padding:8px 28px 8px 10px;border:1px solid var(--border);border-radius:7px;background:#fff;color:var(--text);font-size:12px}
+.dashboard-scope{display:flex;align-items:center;gap:7px;margin:-8px 0 14px;color:var(--muted);font-size:12px}.dashboard-scope b{color:var(--primary-dark)}
+.dashboard-status-row{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #edf1f5;padding:10px 2px;font-size:13px}.dashboard-status-row:last-child{border-bottom:0}
+@media(max-width:760px){.summary-groups{grid-template-columns:1fr}}
+.work-form-progress{display:flex;justify-content:space-between;align-items:center;margin:0 0 14px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:#f7fbff;color:var(--muted);font-size:12px;font-weight:700}
+.work-sections{display:grid;gap:12px;max-height:66vh;overflow:auto;padding-right:4px}
+.work-section{padding:16px;border:1px solid var(--border);border-radius:10px;background:#fff}
+.work-section-title{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px}
+.work-section-title>b{display:grid;place-items:center;width:25px;height:25px;border-radius:50%;background:var(--primary);color:#fff;font-size:12px;flex:0 0 auto}
+.work-section-title h4{margin:0;font-size:15px}.work-section-title p{margin:3px 0 0;color:var(--muted);font-size:12px}
+.work-section:nth-child(6){display:none}
+.inline-field{display:flex;gap:8px}.inline-field input{flex:1}.inline-field .btn{white-space:nowrap}
+.tam-grid{grid-template-columns:repeat(4,1fr)}
+@media(max-width:760px){.tam-grid{grid-template-columns:1fr 1fr}.inline-field{align-items:stretch;flex-direction:column}.work-sections{max-height:62vh}}
+@media(max-width:760px){.dashboard-project-picker label{display:none}.dashboard-project-picker select{max-width:145px}.topbar-right .date{display:none}}
+</style>
+</head>
+<body>
+<section id="loginScreen" class="login-page">
+  <div class="login-visual" aria-hidden="true">
+    <div class="login-visual-top"><img src="zygal.jpeg" alt=""><span>ZYGAL<sup>®</sup></span></div>
+    <div class="login-visual-copy"><span class="brand-kicker">INTERNAL OPERATIONS PLATFORM</span><h2>Connecting<br><em>Structures.</em></h2><p>One connected workspace for the teams, sites and support systems that keep operations moving.</p></div>
+    <div class="brand-triad"><i></i><i></i><i></i></div>
+    <span class="login-visual-footer">Deekshaa Infosystems pvt ltd</span>
+  </div>
+  <form id="loginForm" class="login-card" novalidate>
+    <div class="login-brand"><div id="loginLogo" class="logo"><span>YOUR LOGO</span></div><div><span class="brand-kicker">ZYGAL®</span><h1>Welcome back</h1><p>Team Operations &amp; Support Management</p></div></div>
+    <div class="field"><label for="loginId">Authorized email</label><input id="loginId" type="email" autocomplete="email" placeholder="Enter your authorized email"></div>
+    <div id="otpField" class="field hidden"><label for="loginOtp">Verification code</label><input id="loginOtp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Enter the 6-digit code"></div>
+    <div class="login-options"><label><input id="rememberMe" type="checkbox" checked> Keep me signed in</label><button type="button" id="resendOtp" class="forgot hidden">Resend code</button></div>
+    <button id="loginSubmit" class="btn login-submit" type="submit" style="width:100%;justify-content:center">Continue <span aria-hidden="true">→</span></button>
+    <div id="loginError" class="error" role="alert" style="margin-top:12px"></div>
+    <p id="authModeNote" style="font-size:11px;margin-top:20px">Only emails authorized by an administrator can receive a verification code.</p>
+  </form>
+</section>
+<div id="app" class="app hidden">
+  <aside id="sidebar" class="sidebar">
+    <div class="brand"><img id="brandMark" class="brand-mark" src="zygal.jpeg" alt="ZYGAL logo"><div class="brand-text">ZYGAL<sup>®</sup><small>Team Operations</small></div></div>
+    <nav id="nav" class="nav" aria-label="Main navigation"></nav>
+    <div class="sidebar-footer"><div class="sidebar-profile"><span id="sidebarAvatar" class="avatar">A</span><div><b id="sidebarName"></b><small id="sidebarRole"></small></div></div><button data-action="logout"><span aria-hidden="true">↪</span> Logout</button></div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-left"><button id="mobileMenu" class="mobile-menu" aria-label="Open navigation">☰</button><div class="logo" id="appLogo"><span>YOUR LOGO</span></div><div><h1 id="pageTitle">Dashboard</h1><div id="pageSub" class="topbar-sub">Internal operations workspace</div></div></div>
+      <div class="topbar-right"><div class="search"><span class="search-icon">⌕</span><input id="globalSearch" placeholder="Search anything..." autocomplete="off" aria-label="Global search"><div id="searchResults" class="search-results hidden"></div></div><div class="dashboard-project-picker"><label for="dashboardProject">Dashboard</label><select id="dashboardProject" aria-label="Select dashboard project"><option value="">All Projects</option></select></div><div class="date"><span aria-hidden="true">◷</span> <b id="dateText"></b></div><div class="profile-menu"><button id="profileTrigger" class="profile-trigger" aria-label="Open profile menu"><span id="avatar" class="avatar">A</span><span><b id="userName"></b><br><small id="userRole"></small></span></button><div id="profileDropdown" class="profile-dropdown hidden"><button data-action="view-profile">View Profile</button><button data-action="edit-profile">Edit Profile</button><button class="danger" data-action="logout">Logout</button></div></div></div>
+    </header>
+    <section id="content" class="content"></section>
+  </main>
+</div>
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div id="modalBox" class="modal-box"></div></div>
+<div id="toast" class="toast hidden" role="status"></div>
+<script>
+  window.TEAM_OPS_SUPABASE_URL = 'https://edugogdxadkjjnnoiura.supabase.co';
+  window.TEAM_OPS_SUPABASE_ANON_KEY = 'sb_publishable_IwXyvFxUiEJeNP_N0iKarA_2CxJx7nd';
+</script>
+<script src="js/config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase-client.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/database.js"></script>
+<script src="script.js" defer></script>
+</body>
+</html>
