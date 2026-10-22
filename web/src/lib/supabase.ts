@@ -7,4 +7,10 @@ if (!url || !key) {
   throw new Error("Missing Supabase settings in web/.env.local");
 }
 
-export const supabase = createClient(url, key);
+export const supabase = createClient(url, key, {
+  auth: {
+    persistSession: true, // keeps the browser signed in between visits
+    autoRefreshToken: true,
+    detectSessionInUrl: false, // we use codes, not magic links
+  },
+});

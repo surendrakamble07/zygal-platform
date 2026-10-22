@@ -1,32 +1,43 @@
-import { useEffect, useState } from "react";
-import { supabase } from "./lib/supabase";
+import type { ReactNode } from "react";
+import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
+import { AuthProvider } from "./auth/AuthProvider";
+import { useAuth } from "./auth/auth-context";
+import HomePage from "./pages/HomePage";
+import LoginPage from "./pages/LoginPage";
+
+function Protected({ children }: { children: ReactNode }) {
+  const { status } = useAuth();
+  if (status === "loading")
+    return <div className="center muted">Loading...</div>;
+  if (status === "signed_out") return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+function LoginGate() {
+  const { status } = useAuth();
+  if (status === "loading")
+    return <div className="center muted">Loading...</div>;
+  return <LoginPage />;
+}
 
 export default function App() {
-  const [msg, setMsg] = useState("Checking connection...");
-
-  useEffect(() => {
-    supabase
-      .from("projects")
-      .select("name")
-      .then(({ data, error }) => {
-        if (error?.code === "42501") {
-          setMsg(
-            "Connected to Supabase. Anonymous access is correctly blocked.",
-          );
-        } else if (error) {
-          setMsg("Problem: " + error.message);
-        } else {
-          setMsg(
-            `Warning: anonymous visitors can read ${data?.length ?? 0} rows. Tell Claude.`,
-          );
-        }
-      });
-  }, []);
-
   return (
-    <div style={{ padding: 24, fontFamily: "sans-serif" }}>
-      <h1>ZYGAL</h1>
-      <p>{msg}</p>
-    </div>
+    <AuthProvider>
+      {/* HashRouter works on GitHub Pages without server settings */}
+      <HashRouter>
+        <Routes>
+          <Route path="/login" element={<LoginGate />} />
+          <Route
+            path="/"
+            element={
+              <Protected>
+                <HomePage />
+              </Protected>
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </HashRouter>
+    </AuthProvider>
   );
 }
