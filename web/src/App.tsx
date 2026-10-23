@@ -1,36 +1,34 @@
-import type { ReactNode } from "react";
-import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
-import { AuthProvider } from "./auth/AuthProvider";
-import { useAuth, type Role } from "./auth/auth-context";
-import Layout from "./components/Layout";
-import ComingSoon from "./pages/ComingSoon";
-import HomePage from "./pages/HomePage";
-import LoginPage from "./pages/LoginPage";
-import SitesPage from "./pages/SitesPage";
-import JobsPage from "./pages/JobsPage";
-import JobDetail from "./pages/JobDetail";
+import type { ReactNode } from 'react'
+import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { AuthProvider } from './auth/AuthProvider'
+import { useAuth, type Role } from './auth/auth-context'
+import Layout from './components/Layout'
+import HomePage from './pages/HomePage'
+import LoginPage from './pages/LoginPage'
+import SitesPage from './pages/SitesPage'
+import JobsPage from './pages/JobsPage'
+import JobDetail from './pages/JobDetail'
+import UsersPage from './pages/UsersPage'
+import ReportsPage from './pages/ReportsPage'
 
 function Protected({ children }: { children: ReactNode }) {
-  const { status } = useAuth();
-  if (status === "loading")
-    return <div className="center muted">Loading...</div>;
-  if (status === "signed_out") return <Navigate to="/login" replace />;
-  return <>{children}</>;
+  const { status } = useAuth()
+  if (status === 'loading') return <div className="center muted">Loading...</div>
+  if (status === 'signed_out') return <Navigate to="/login" replace />
+  return <>{children}</>
 }
 
 // Convenience only: the database rules enforce who can really do what.
 function RoleGate({ roles, children }: { roles: Role[]; children: ReactNode }) {
-  const { profile } = useAuth();
-  if (!profile || !roles.includes(profile.role))
-    return <Navigate to="/" replace />;
-  return <>{children}</>;
+  const { profile } = useAuth()
+  if (!profile || !roles.includes(profile.role)) return <Navigate to="/" replace />
+  return <>{children}</>
 }
 
 function LoginGate() {
-  const { status } = useAuth();
-  if (status === "loading")
-    return <div className="center muted">Loading...</div>;
-  return <LoginPage />;
+  const { status } = useAuth()
+  if (status === 'loading') return <div className="center muted">Loading...</div>
+  return <LoginPage />
 }
 
 export default function App() {
@@ -54,16 +52,16 @@ export default function App() {
             <Route
               path="reports"
               element={
-                <RoleGate roles={["team_lead", "admin"]}>
-                  <ComingSoon title="Reports" />
+                <RoleGate roles={['team_lead', 'admin']}>
+                  <ReportsPage />
                 </RoleGate>
               }
             />
             <Route
               path="users"
               element={
-                <RoleGate roles={["admin"]}>
-                  <ComingSoon title="Users" />
+                <RoleGate roles={['admin']}>
+                  <UsersPage />
                 </RoleGate>
               }
             />
@@ -72,5 +70,5 @@ export default function App() {
         </Routes>
       </HashRouter>
     </AuthProvider>
-  );
+  )
 }
