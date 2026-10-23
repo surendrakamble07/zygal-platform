@@ -330,3 +330,64 @@ th {
     flex-wrap: wrap;
   }
 }
+
+/* Jobs: extra elements */
+textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  resize: vertical;
+}
+textarea:focus {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+.hint {
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+.hint.ok {
+  color: #1a7f37;
+}
+.hint.bad {
+  color: var(--err);
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.inline-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.inline-form select,
+.inline-form input {
+  width: auto;
+  flex: 1 1 160px;
+}
+.inline-form .qty {
+  flex: 0 0 70px;
+}
+.date-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.date-field input {
+  padding: 9px 10px;
+}
+@media (prefers-color-scheme: dark) {
+  .hint.ok {
+    color: #4ade80;
+  }
+}

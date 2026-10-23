@@ -7,6 +7,8 @@ import ComingSoon from "./pages/ComingSoon";
 import HomePage from "./pages/HomePage";
 import LoginPage from "./pages/LoginPage";
 import SitesPage from "./pages/SitesPage";
+import JobsPage from "./pages/JobsPage";
+import JobDetail from "./pages/JobDetail";
 
 function Protected({ children }: { children: ReactNode }) {
   const { status } = useAuth();
@@ -47,7 +49,8 @@ export default function App() {
           >
             <Route index element={<HomePage />} />
             <Route path="sites" element={<SitesPage />} />
-            <Route path="jobs" element={<ComingSoon title="Jobs" />} />
+            <Route path="jobs" element={<JobsPage />} />
+            <Route path="jobs/:jobId" element={<JobDetail />} />
             <Route
               path="reports"
               element={
