@@ -21,12 +21,17 @@ interface AuditRow {
   changed_at: string
 }
 
-interface LoginRow {
+interface SessionStartRow {
   id: number
-  user_id: string | null
-  email: string | null
-  event: string
-  created_at: string
+  user_id: string
+  started_at: string
+}
+
+interface SessionEndRow {
+  id: number
+  user_id: string
+  ended_at: string
+  end_reason: 'logout' | 'timeout' | null
 }
 
 interface JobStatusRow {
@@ -63,15 +68,6 @@ const ENTITY_NAMES: Record<string, string> = {
   jobs: 'job',
   job_checklist: 'job checklist',
   material_issues: 'material issue',
-}
-
-const LOGIN_EVENTS: Record<string, { message: string; badge: string }> = {
-  login_success: { message: 'logged in', badge: 'Logged in' },
-  logout: { message: 'logged out', badge: 'Logged out' },
-  login_failed: { message: 'failed login attempt', badge: 'Failed login' },
-  otp_requested: { message: 'requested a login code', badge: 'Login code requested' },
-  blocked_inactive: { message: 'tried to log in but their account is inactive', badge: 'Account blocked' },
-  new_device: { message: 'logged in from a new device', badge: 'New device login' },
 }
 
 function dayStart(value: string): string {
@@ -120,7 +116,7 @@ function relativeTime(value: string): string {
 }
 
 async function loadActivities(dateFrom: string, dateTo: string): Promise<ActivityData> {
-  const [auditResult, loginResult, statusResult] = await Promise.all([
+  const [auditResult, sessionStartResult, sessionEndResult, statusResult] = await Promise.all([
     (() => {
       let query = supabase
         .from('audit_log')
@@ -133,12 +129,23 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
     })(),
     (() => {
       let query = supabase
-        .from('login_events')
-        .select('id, user_id, email, event, created_at')
-        .order('created_at', { ascending: false })
+        .from('user_sessions')
+        .select('id, user_id, started_at')
+        .order('started_at', { ascending: false })
         .limit(ROW_LIMIT)
-      if (dateFrom) query = query.gte('created_at', dayStart(dateFrom))
-      if (dateTo) query = query.lt('created_at', nextDayStart(dateTo))
+      if (dateFrom) query = query.gte('started_at', dayStart(dateFrom))
+      if (dateTo) query = query.lt('started_at', nextDayStart(dateTo))
+      return query
+    })(),
+    (() => {
+      let query = supabase
+        .from('user_sessions')
+        .select('id, user_id, ended_at, end_reason')
+        .not('ended_at', 'is', null)
+        .order('ended_at', { ascending: false })
+        .limit(ROW_LIMIT)
+      if (dateFrom) query = query.gte('ended_at', dayStart(dateFrom))
+      if (dateTo) query = query.lt('ended_at', nextDayStart(dateTo))
       return query
     })(),
     (() => {
@@ -154,15 +161,18 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
   ])
 
   if (auditResult.error) throw auditResult.error
-  if (loginResult.error) throw loginResult.error
+  if (sessionStartResult.error) throw sessionStartResult.error
+  if (sessionEndResult.error) throw sessionEndResult.error
   if (statusResult.error) throw statusResult.error
 
   const auditRows = auditResult.data as AuditRow[]
-  const loginRows = loginResult.data as LoginRow[]
+  const sessionStartRows = sessionStartResult.data as SessionStartRow[]
+  const sessionEndRows = sessionEndResult.data as SessionEndRow[]
   const statusRows = statusResult.data as JobStatusRow[]
   const profileIds = [...new Set([
     ...auditRows.map((row) => row.changed_by),
-    ...loginRows.map((row) => row.user_id),
+    ...sessionStartRows.map((row) => row.user_id),
+    ...sessionEndRows.map((row) => row.user_id),
     ...statusRows.map((row) => row.changed_by),
   ].filter((id): id is string => id !== null))]
   const jobIds = [...new Set(statusRows.map((row) => row.job_id))]
@@ -185,7 +195,7 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
     (jobsResult.data as { id: string; job_no: number }[]).map((job) => [job.id, job.job_no]),
   )
 
-  const activities: Activity[] = [
+  const mergedActivities: Activity[] = [
     ...auditRows.map((row): Activity => {
       const entity = ENTITY_NAMES[row.table_name] ?? row.table_name.replace(/_/g, ' ').replace(/s$/, '')
       const label = recordLabel(row.new_data, row.old_data)
@@ -204,17 +214,32 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
         timestamp: row.changed_at,
       }
     }),
-    ...loginRows.map((row): Activity => {
-      const event = LOGIN_EVENTS[row.event] ?? { message: row.event.replace(/_/g, ' '), badge: 'Login event' }
-      const person = row.user_id ? people.get(row.user_id) : undefined
-      const actor = person ?? (row.email ? `Unknown — ${event.message} for ${row.email}` : `Unknown — ${event.message}`)
+    ...sessionStartRows.map((row): Activity => {
+      const person = people.get(row.user_id) ?? 'Unknown'
       return {
-        id: `login-${row.id}`,
+        id: `session-login-${row.id}`,
         type: 'login',
-        person: person ?? 'Unknown',
-        message: person ? `${person} ${event.message}` : actor,
-        badge: event.badge,
-        timestamp: row.created_at,
+        person,
+        message: `${person} logged in`,
+        badge: 'Logged in',
+        timestamp: row.started_at,
+      }
+    }),
+    ...sessionEndRows.map((row): Activity => {
+      const person = people.get(row.user_id) ?? 'Unknown'
+      const isLogout = row.end_reason === 'logout'
+      const isTimeout = row.end_reason === 'timeout'
+      return {
+        id: `session-end-${row.id}`,
+        type: 'login',
+        person,
+        message: isLogout
+          ? `${person} logged out`
+          : isTimeout
+            ? `${person}'s session ended due to inactivity`
+            : `${person}'s session ended`,
+        badge: isLogout ? 'Logged out' : isTimeout ? 'Timed out' : 'Session ended',
+        timestamp: row.ended_at,
       }
     }),
     ...statusRows.map((row): Activity => {
@@ -231,10 +256,20 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
       }
     }),
   ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+  let loginActivityCount = 0
+  const activities = mergedActivities.filter((activity) => {
+    if (activity.type !== 'login') return true
+    loginActivityCount += 1
+    return loginActivityCount <= ROW_LIMIT
+  })
 
   return {
     activities,
-    limited: auditRows.length === ROW_LIMIT || loginRows.length === ROW_LIMIT || statusRows.length === ROW_LIMIT,
+    limited: auditRows.length === ROW_LIMIT
+      || sessionStartRows.length === ROW_LIMIT
+      || sessionEndRows.length === ROW_LIMIT
+      || sessionStartRows.length + sessionEndRows.length > ROW_LIMIT
+      || statusRows.length === ROW_LIMIT,
   }
 }
 
