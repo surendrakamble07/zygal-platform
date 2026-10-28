@@ -4,6 +4,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./index.css";
 import App from "./App";
 
+const savedTheme = window.localStorage.getItem("zygal-theme");
+document.documentElement.dataset.theme =
+  savedTheme === "light" || savedTheme === "dark"
+    ? savedTheme
+    : window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: false },

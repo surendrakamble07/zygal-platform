@@ -105,12 +105,15 @@ export default function SiteForm({ site, onClose }: Props) {
       <div className="modal" role="dialog" aria-modal="true" aria-label={site ? 'Edit site' : 'Add site'}>
         <h2>{site ? 'Edit site' : 'Add site'}</h2>
         {loading ? (
-          <p className="muted">Loading...</p>
+          <div className="form-loading" aria-label="Loading form options">
+            <span className="skeleton-bar" /><span className="skeleton-bar" /><span className="skeleton-bar" />
+          </div>
         ) : (
           <form onSubmit={submit} noValidate className="grid-form">
             <label>
-              Project
+              <span className="field-caption">Project <span className="field-required">*</span></span>
               <select
+                aria-required="true"
                 value={projectId}
                 onChange={(e) => {
                   setProjectId(e.target.value)
@@ -129,8 +132,8 @@ export default function SiteForm({ site, onClose }: Props) {
             </label>
 
             <label>
-              Project type
-              <select value={typeId} onChange={(e) => setTypeId(e.target.value)} disabled={!projectId}>
+              <span className="field-caption">Project type <span className="field-required">*</span></span>
+              <select aria-required="true" value={typeId} onChange={(e) => setTypeId(e.target.value)} disabled={!projectId}>
                 <option value="">{projectId ? 'Select type' : 'Choose a project first'}</option>
                 {typeOptions.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -141,18 +144,18 @@ export default function SiteForm({ site, onClose }: Props) {
             </label>
 
             <label>
-              Branch code
-              <input value={branchCode} onChange={(e) => setBranchCode(e.target.value)} maxLength={60} />
+              <span className="field-caption">Branch code <span className="field-required">*</span></span>
+              <input aria-required="true" value={branchCode} onChange={(e) => setBranchCode(e.target.value)} maxLength={60} />
             </label>
 
             <label>
-              Branch name (optional)
+              <span className="field-caption">Branch name <span className="field-optional">Optional</span></span>
               <input value={branchName} onChange={(e) => setBranchName(e.target.value)} maxLength={120} />
             </label>
 
             <label>
-              State
-              <select value={stateName} onChange={(e) => setStateName(e.target.value)}>
+              <span className="field-caption">State <span className="field-required">*</span></span>
+              <select aria-required="true" value={stateName} onChange={(e) => setStateName(e.target.value)}>
                 <option value="">Select state</option>
                 {(states.data ?? []).map((s) => (
                   <option key={s.name} value={s.name}>
@@ -163,7 +166,7 @@ export default function SiteForm({ site, onClose }: Props) {
             </label>
 
             <label>
-              Status
+              <span className="field-caption">Status <span className="field-required">*</span></span>
               <select value={status} onChange={(e) => setStatus(e.target.value as 'Active' | 'Inactive')}>
                 <option value="Active">Active</option>
                 <option value="Inactive">Inactive</option>
@@ -171,16 +174,16 @@ export default function SiteForm({ site, onClose }: Props) {
             </label>
 
             <label>
-              Latitude (optional)
+              <span className="field-caption">Latitude <span className="field-optional">Optional</span></span>
               <input inputMode="decimal" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="22.483586" />
             </label>
 
             <label>
-              Longitude (optional)
+              <span className="field-caption">Longitude <span className="field-optional">Optional</span></span>
               <input inputMode="decimal" value={lng} onChange={(e) => setLng(e.target.value)} placeholder="72.801502" />
             </label>
 
-            {error && <div className="banner error full">{error}</div>}
+            {error && <div className="banner error full form-error" role="alert">{error}</div>}
 
             <div className="actions full">
               <button type="button" className="secondary" onClick={onClose} disabled={save.isPending}>

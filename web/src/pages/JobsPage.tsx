@@ -1,17 +1,144 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { useCallTypes, useFinalStatuses, useHandoverStatuses } from '../lib/job-queries'
-import type { Job } from '../lib/job-types'
+import { jobsSelect, useCallTypes, useFinalStatuses, useHandoverStatuses, type JoinedJob } from '../lib/job-queries'
+import Icon from '../components/Icon'
+import StatusBadge from '../components/StatusBadge'
+import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 import JobForm from './JobForm'
 
 const PAGE_SIZE = 25
+const COLUMN_STORAGE_KEY = 'zygal-jobs-visible-columns'
 
-interface Names {
-  siteLabel: string
-  takenBy: string
-  engineer: string
+interface JobTableRow {
+  id: string
+  job_no: number
+  job_date: string
+  call_type: string
+  project: string | null
+  projectType: string | null
+  branchCode: string
+  branchName: string | null
+  state: string | null
+  latLong: string | null
+  simName: string | null
+  simNumber: string | null
+  linkIp: string | null
+  linkMacId: string | null
+  vaultTam: string | null
+  cashCounterTam: string | null
+  mainDoorTam: string | null
+  nglMainDoor: string | null
+  takenBy: string | null
+  engineerName: string | null
+  engineerNumber: string | null
+  remark: string | null
+  handoverStatus: string
+  pendingMaterials: number
+  finalStatus: string
+  ruleCheck: boolean
+  hasMinorIssue: boolean
+}
+
+interface JobColumn {
+  id: string
+  label: string
+  defaultVisible?: boolean
+  render: (job: JobTableRow) => ReactNode
+}
+
+const COLUMNS: JobColumn[] = [
+  { id: 'jobDate', label: 'Date', defaultVisible: true, render: (j) => j.job_date },
+  { id: 'callType', label: 'Call Type', defaultVisible: true, render: (j) => j.call_type },
+  { id: 'project', label: 'Project', defaultVisible: true, render: (j) => j.project ?? '-' },
+  { id: 'projectType', label: 'Project Type', render: (j) => j.projectType ?? '-' },
+  {
+    id: 'branchCode',
+    label: 'Branch Code',
+    defaultVisible: true,
+    render: (j) => j.branchName ? `${j.branchCode} — ${j.branchName}` : j.branchCode,
+  },
+  { id: 'state', label: 'State', defaultVisible: true, render: (j) => j.state ?? '-' },
+  { id: 'latLong', label: 'Lat/Long', render: (j) => j.latLong ?? '-' },
+  { id: 'simName', label: 'SIM Name', render: (j) => j.simName ?? '-' },
+  { id: 'simNumber', label: 'SIM Card No.', render: (j) => j.simNumber ?? '-' },
+  { id: 'linkIp', label: 'Link IP', render: (j) => j.linkIp ?? '-' },
+  { id: 'linkMacId', label: 'Link Device MAC ID', render: (j) => j.linkMacId ?? '-' },
+  { id: 'vaultTam', label: 'Vault TAM', render: (j) => j.vaultTam ?? '-' },
+  { id: 'cashCounterTam', label: 'Cash Counter TAM', render: (j) => j.cashCounterTam ?? '-' },
+  { id: 'mainDoorTam', label: 'Main Door TAM', render: (j) => j.mainDoorTam ?? '-' },
+  { id: 'nglMainDoor', label: 'NGL Main Door', render: (j) => j.nglMainDoor ?? '-' },
+  { id: 'takenBy', label: 'Call Taken By', render: (j) => j.takenBy ?? '-' },
+  { id: 'engineerName', label: 'Engineer Name', defaultVisible: true, render: (j) => j.engineerName ?? 'Not assigned' },
+  { id: 'engineerNumber', label: 'Engineer Number', render: (j) => j.engineerNumber ?? '-' },
+  {
+    id: 'remark',
+    label: 'Site Remark',
+    render: (j) => j.remark ? <span title={j.remark}>{j.remark.length > 40 ? `${j.remark.slice(0, 40)}...` : j.remark}</span> : '-',
+  },
+  { id: 'handoverStatus', label: 'Handover Status', defaultVisible: true, render: (j) => <StatusBadge status={j.handoverStatus} /> },
+  {
+    id: 'materialIssue',
+    label: 'Material Issue',
+    render: (j) => j.pendingMaterials > 0 ? <StatusBadge status={`${j.pendingMaterials} pending`} /> : '-',
+  },
+  { id: 'finalStatus', label: 'Final Status', defaultVisible: true, render: (j) => <StatusBadge status={j.finalStatus} /> },
+  { id: 'ruleCheck', label: 'Rule Check', render: (j) => j.ruleCheck ? <StatusBadge status="OK" /> : '-' },
+  { id: 'minorIssue', label: 'Minor', defaultVisible: true, render: (j) => j.hasMinorIssue ? 'Yes' : '-' },
+]
+
+const DEFAULT_VISIBLE_COLUMNS = COLUMNS.filter((column) => column.defaultVisible).map((column) => column.id)
+
+function initialVisibleColumns(): string[] {
+  try {
+    const stored = window.localStorage.getItem(COLUMN_STORAGE_KEY)
+    if (stored === null) return DEFAULT_VISIBLE_COLUMNS
+    const validIds = new Set(COLUMNS.map((column) => column.id))
+    return stored.split('|').filter((id) => validIds.has(id))
+  } catch {
+    return DEFAULT_VISIBLE_COLUMNS
+  }
+}
+
+function toJobTableRow(row: JoinedJob): JobTableRow {
+  const site = row.site
+  const activeDevices = (site?.devices ?? []).filter(
+    (device) => device.device_status === 'Active' && device.deleted_at === null,
+  )
+  const device = activeDevices.length === 1 ? activeDevices[0] : null
+  const pendingMaterials = (row.material_issues ?? []).filter((issue) => issue.status === 'Pending').length
+  const finalStatus = row.final_status
+
+  return {
+    id: row.id,
+    job_no: row.job_no,
+    job_date: row.job_date,
+    call_type: row.call_type,
+    project: site?.project?.name ?? null,
+    projectType: site?.project_type?.name ?? null,
+    branchCode: site?.branch_code ?? '-',
+    branchName: site?.branch_name ?? null,
+    state: site?.state ?? null,
+    latLong: site?.latitude != null && site.longitude != null ? `${site.latitude}, ${site.longitude}` : null,
+    simName: device?.sim_name ?? null,
+    simNumber: device?.sim_number ?? null,
+    linkIp: device?.link_ip ?? null,
+    linkMacId: device?.link_mac_id ?? null,
+    vaultTam: device?.vault_tam ?? null,
+    cashCounterTam: device?.cash_counter_tam ?? null,
+    mainDoorTam: device?.main_door_tam ?? null,
+    nglMainDoor: device?.ngl_main_door_tam ?? null,
+    takenBy: row.taken_by?.full_name ?? null,
+    engineerName: row.engineer?.full_name ?? null,
+    engineerNumber: row.engineer?.phone ?? null,
+    remark: row.remark,
+    handoverStatus: row.handover_status,
+    pendingMaterials,
+    finalStatus,
+    ruleCheck: finalStatus === 'Completed' || finalStatus === 'Live',
+    hasMinorIssue: row.has_minor_issue,
+  }
 }
 
 export default function JobsPage() {
@@ -28,7 +155,9 @@ export default function JobsPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [adding, setAdding] = useState(false)
-  const [names, setNames] = useState<Record<string, Names>>({})
+  const [columnsOpen, setColumnsOpen] = useState(false)
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(initialVisibleColumns)
+  const [columnPreferenceError, setColumnPreferenceError] = useState(false)
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -44,10 +173,7 @@ export default function JobsPage() {
     queryFn: async () => {
       let q = supabase
         .from('jobs')
-        .select(
-          'id, job_no, job_date, call_type, site_id, call_taken_by, engineer_id, handover_status, final_status, has_minor_issue, remark, completed_at',
-          { count: 'exact' },
-        )
+        .select(jobsSelect(), { count: 'exact' })
         .is('deleted_at', null)
 
       if (callType) q = q.eq('call_type', callType)
@@ -57,22 +183,19 @@ export default function JobsPage() {
       if (dateTo) q = q.lte('job_date', dateTo)
 
       const clean = search.replace(/[,()*%\\"]/g, ' ').trim()
-      let siteIds: string[] | null = null
       if (clean) {
-        const { data: siteMatches } = await supabase
-          .from('sites')
-          .select('id')
-          .or(`branch_code.ilike.*${clean}*,branch_name.ilike.*${clean}*`)
-          .limit(200)
-        siteIds = (siteMatches ?? []).map((s) => s.id as string)
-        if (siteIds.length === 0) return { rows: [] as Job[], total: 0 }
-        q = q.in('site_id', siteIds)
+        q = q.or(`branch_code.ilike.*${clean}*,branch_name.ilike.*${clean}*`, { referencedTable: 'site' })
       }
 
       const from = page * PAGE_SIZE
-      const { data, count, error } = await q.order('job_date', { ascending: false }).order('job_no', { ascending: false }).range(from, from + PAGE_SIZE - 1)
+      const { data, count, error } = await q
+        .order('job_date', { ascending: false })
+        .order('job_no', { ascending: false })
+        .range(from, from + PAGE_SIZE - 1)
       if (error) throw error
-      return { rows: (data ?? []) as Job[], total: count ?? 0 }
+
+      const rows = ((data ?? []) as unknown as JoinedJob[]).map(toJobTableRow)
+      return { rows, total: count ?? 0 }
     },
   })
 
@@ -81,49 +204,59 @@ export default function JobsPage() {
   const first = total === 0 ? 0 : page * PAGE_SIZE + 1
   const last = Math.min((page + 1) * PAGE_SIZE, total)
   const hasNext = (page + 1) * PAGE_SIZE < total
+  const shownColumns = COLUMNS.filter((column) => visibleColumns.includes(column.id))
 
-  // Look up site / person names for just the rows on screen (cheap, since it's at most 25).
-  useEffect(() => {
-    if (rows.length === 0) return
-    let cancelled = false
-    ;(async () => {
-      const siteIds = [...new Set(rows.map((r) => r.site_id))]
-      const userIds = [...new Set(rows.map((r) => r.call_taken_by))]
-      const engIds = [...new Set(rows.map((r) => r.engineer_id).filter((x): x is string => !!x))]
-
-      const [sites, users, engs] = await Promise.all([
-        supabase.from('sites').select('id, branch_code, branch_name').in('id', siteIds),
-        supabase.from('profiles').select('id, full_name').in('id', userIds),
-        engIds.length ? supabase.from('engineers').select('id, full_name').in('id', engIds) : Promise.resolve({ data: [] }),
-      ])
-      if (cancelled) return
-
-      const siteMap = new Map((sites.data ?? []).map((s: any) => [s.id, `${s.branch_code}${s.branch_name ? ' - ' + s.branch_name : ''}`]))
-      const userMap = new Map((users.data ?? []).map((u: any) => [u.id, u.full_name]))
-      const engMap = new Map((engs.data ?? []).map((e: any) => [e.id, e.full_name]))
-
-      const next: Record<string, Names> = {}
-      for (const r of rows) {
-        next[r.id] = {
-          siteLabel: siteMap.get(r.site_id) ?? r.site_id,
-          takenBy: userMap.get(r.call_taken_by) ?? '-',
-          engineer: r.engineer_id ? engMap.get(r.engineer_id) ?? '-' : 'Not assigned',
-        }
-      }
-      setNames(next)
-    })()
-    return () => {
-      cancelled = true
+  function toggleColumn(columnId: string) {
+    const next = visibleColumns.includes(columnId)
+      ? visibleColumns.filter((id) => id !== columnId)
+      : [...visibleColumns, columnId]
+    setVisibleColumns(next)
+    try {
+      window.localStorage.setItem(COLUMN_STORAGE_KEY, next.join('|'))
+      setColumnPreferenceError(false)
+    } catch {
+      setColumnPreferenceError(true)
     }
-  }, [rows])
+  }
 
   return (
     <>
       <section className="card">
         <div className="head-row">
           <h2>Jobs</h2>
-          <button onClick={() => setAdding(true)}>New job</button>
+          <div className="jobs-toolbar">
+            <div className="column-picker">
+              <button
+                type="button"
+                className="secondary"
+                aria-expanded={columnsOpen}
+                aria-controls="jobs-column-options"
+                onClick={() => setColumnsOpen((open) => !open)}
+              >
+                Columns
+              </button>
+              {columnsOpen && (
+                <div className="column-options" id="jobs-column-options">
+                  {COLUMNS.map((column) => (
+                    <label key={column.id} className="column-option">
+                      <input
+                        type="checkbox"
+                        checked={visibleColumns.includes(column.id)}
+                        onChange={() => toggleColumn(column.id)}
+                      />
+                      {column.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button onClick={() => setAdding(true)}><Icon name="plus" size={17} />New job</button>
+          </div>
         </div>
+
+        {columnPreferenceError && (
+          <div className="banner warn" role="status">Column choices could not be saved in this browser.</div>
+        )}
 
         <div className="filters">
           <input
@@ -167,32 +300,22 @@ export default function JobsPage() {
             <thead>
               <tr>
                 <th>Job #</th>
-                <th>Date</th>
-                <th>Call type</th>
-                <th>Site</th>
-                <th>Engineer</th>
-                <th>Handover</th>
-                <th>Final status</th>
-                <th>Minor</th>
+                {shownColumns.map((column) => <th key={column.id}>{column.label}</th>)}
               </tr>
             </thead>
             <tbody>
-              {jobs.isLoading && (
-                <tr><td colSpan={8} className="muted">Loading...</td></tr>
-              )}
+              {jobs.isLoading && <TableSkeleton columns={shownColumns.length + 1} />}
               {!jobs.isLoading && rows.length === 0 && (
-                <tr><td colSpan={8} className="muted">No jobs found.</td></tr>
+                <TableEmptyState
+                  columns={shownColumns.length + 1}
+                  message="No jobs match these filters."
+                  action={<button onClick={() => setAdding(true)}><Icon name="plus" size={16} />Create a job</button>}
+                />
               )}
-              {rows.map((j) => (
-                <tr key={j.id}>
-                  <td><Link to={`/jobs/${j.id}`}>#{j.job_no}</Link></td>
-                  <td>{j.job_date}</td>
-                  <td>{j.call_type}</td>
-                  <td>{names[j.id]?.siteLabel ?? '...'}</td>
-                  <td>{names[j.id]?.engineer ?? '...'}</td>
-                  <td>{j.handover_status}</td>
-                  <td>{j.final_status}</td>
-                  <td>{j.has_minor_issue ? 'Yes' : ''}</td>
+              {rows.map((job) => (
+                <tr key={job.id}>
+                  <td><Link className="icon-action table-link" aria-label={`View job ${job.job_no}`} to={`/jobs/${job.id}`}><Icon name="view" size={16} />#{job.job_no}</Link></td>
+                  {shownColumns.map((column) => <td key={column.id}>{column.render(job)}</td>)}
                 </tr>
               ))}
             </tbody>
@@ -200,7 +323,7 @@ export default function JobsPage() {
         </div>
 
         <div className="head-row">
-          <span className="muted small">{total === 0 ? 'No results' : `Showing ${first}-${last} of ${total}`}</span>
+          <span className="muted small">{total === 0 ? '0 jobs' : `Showing ${first}-${last} of ${total} jobs`}</span>
           <div className="actions">
             <button className="secondary" disabled={page === 0 || jobs.isFetching} onClick={() => setPage((p) => p - 1)}>Previous</button>
             <button className="secondary" disabled={!hasNext || jobs.isFetching} onClick={() => setPage((p) => p + 1)}>Next</button>

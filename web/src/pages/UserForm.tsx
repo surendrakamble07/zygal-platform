@@ -78,8 +78,9 @@ export default function UserForm({ employee, onClose }: Props) {
         <h2>{employee ? "Edit employee" : "Add employee"}</h2>
         <form onSubmit={submit} noValidate className="grid-form">
           <label className={employee ? "full" : ""}>
-            Office email
+            <span className="field-caption">Office email {!employee && <span className="field-required">*</span>}</span>
             <input
+              aria-required={!employee}
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -92,8 +93,9 @@ export default function UserForm({ employee, onClose }: Props) {
           </label>
 
           <label className={employee ? "full" : ""}>
-            Full name
+            <span className="field-caption">Full name <span className="field-required">*</span></span>
             <input
+              aria-required="true"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               maxLength={120}
@@ -101,7 +103,7 @@ export default function UserForm({ employee, onClose }: Props) {
           </label>
 
           <label>
-            Role
+            <span className="field-caption">Role <span className="field-required">*</span></span>
             <select
               value={role}
               onChange={(e) => setRole(e.target.value as Role)}
@@ -115,7 +117,7 @@ export default function UserForm({ employee, onClose }: Props) {
           </label>
 
           <label>
-            Job title (optional)
+            <span className="field-caption">Job title <span className="field-optional">Optional</span></span>
             <input
               value={jobTitle}
               onChange={(e) => setJobTitle(e.target.value)}
@@ -123,7 +125,7 @@ export default function UserForm({ employee, onClose }: Props) {
             />
           </label>
 
-          {error && <div className="banner error full">{error}</div>}
+          {error && <div className="banner error full form-error" role="alert">{error}</div>}
 
           <div className="actions full">
             <button

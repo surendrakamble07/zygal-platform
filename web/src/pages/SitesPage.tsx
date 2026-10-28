@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useProjects, useProjectTypes, useStates } from '../lib/queries'
 import type { Site } from '../lib/types'
+import Icon from '../components/Icon'
+import StatusBadge from '../components/StatusBadge'
+import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 import SiteForm from './SiteForm'
 
 const PAGE_SIZE = 25
@@ -67,7 +71,7 @@ export default function SitesPage() {
       <section className="card">
         <div className="head-row">
           <h2>Sites</h2>
-          <button onClick={() => setAdding(true)}>Add site</button>
+          <button onClick={() => setAdding(true)}><Icon name="plus" size={17} />Add site</button>
         </div>
 
         <div className="filters">
@@ -135,31 +139,26 @@ export default function SitesPage() {
               </tr>
             </thead>
             <tbody>
-              {sites.isLoading && (
-                <tr>
-                  <td colSpan={8} className="muted">
-                    Loading...
-                  </td>
-                </tr>
-              )}
+              {sites.isLoading && <TableSkeleton columns={8} />}
               {!sites.isLoading && rows.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="muted">
-                    No sites found.
-                  </td>
-                </tr>
+                <TableEmptyState
+                  columns={8}
+                  message="No sites match these filters."
+                  action={<button onClick={() => setAdding(true)}><Icon name="plus" size={16} />Add a site</button>}
+                />
               )}
               {rows.map((s) => (
                 <tr key={s.id}>
-                  <td>{s.branch_code}</td>
+                  <td><Link to={`/sites/${s.id}`}>{s.branch_code}</Link></td>
                   <td>{s.branch_name ?? '-'}</td>
                   <td>{projectName.get(s.project_id) ?? '-'}</td>
                   <td>{typeName.get(s.project_type_id) ?? '-'}</td>
                   <td>{s.state ?? '-'}</td>
                   <td>{s.latitude != null && s.longitude != null ? `${s.latitude}, ${s.longitude}` : '-'}</td>
-                  <td>{s.status}</td>
+                  <td><StatusBadge status={s.status} /></td>
                   <td>
-                    <button className="link" onClick={() => setEditing(s)}>
+                    <button className="link icon-action" aria-label={`Edit ${s.branch_code}`} onClick={() => setEditing(s)}>
+                      <Icon name="edit" size={16} />
                       Edit
                     </button>
                   </td>
@@ -171,7 +170,7 @@ export default function SitesPage() {
 
         <div className="head-row">
           <span className="muted small">
-            {total === 0 ? 'No results' : `Showing ${first}-${last} of ${total}`}
+            {total === 0 ? '0 sites' : `Showing ${first}-${last} of ${total} sites`}
           </span>
           <div className="actions">
             <button className="secondary" disabled={page === 0 || sites.isFetching} onClick={() => setPage((p) => p - 1)}>

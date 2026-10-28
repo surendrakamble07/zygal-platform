@@ -4,6 +4,9 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../auth/auth-context'
 import { callProvision } from '../lib/user-queries'
 import type { EmployeeRow, Role } from '../lib/user-types'
+import Icon from '../components/Icon'
+import StatusBadge from '../components/StatusBadge'
+import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 import UserForm from './UserForm'
 
 const PAGE_SIZE = 25
@@ -66,11 +69,9 @@ function OnlineNow() {
             </tr>
           </thead>
           <tbody>
-            {online.isLoading && (
-              <tr><td colSpan={3} className="muted">Loading...</td></tr>
-            )}
+            {online.isLoading && <TableSkeleton columns={3} rows={2} />}
             {!online.isLoading && rows.length === 0 && (
-              <tr><td colSpan={3} className="muted">Nobody is online right now.</td></tr>
+              <TableEmptyState columns={3} message="Nobody is online right now." />
             )}
             {rows.map((r) => (
               <tr key={r.session_id}>
@@ -151,7 +152,7 @@ export default function UsersPage() {
       <section className="card">
         <div className="head-row">
           <h2>Users</h2>
-          <button onClick={() => setAdding(true)}>Add employee</button>
+          <button onClick={() => setAdding(true)}><Icon name="plus" size={17} />Add employee</button>
         </div>
         <p className="muted small">
           New employees sign in with their office email and a one-time code sent by email. There is no
@@ -194,11 +195,9 @@ export default function UsersPage() {
               </tr>
             </thead>
             <tbody>
-              {employees.isLoading && (
-                <tr><td colSpan={6} className="muted">Loading...</td></tr>
-              )}
+              {employees.isLoading && <TableSkeleton columns={6} />}
               {!employees.isLoading && rows.length === 0 && (
-                <tr><td colSpan={6} className="muted">No employees found.</td></tr>
+                <TableEmptyState columns={6} message="No employees match these filters." />
               )}
               {rows.map((u) => (
                 <tr key={u.id}>
@@ -206,9 +205,9 @@ export default function UsersPage() {
                   <td>{u.email}</td>
                   <td>{ROLE_LABEL[u.role]}</td>
                   <td>{u.job_title ?? '-'}</td>
-                  <td>{u.is_active ? 'Active' : 'Inactive'}</td>
+                  <td><StatusBadge status={u.is_active ? 'Active' : 'Inactive'} /></td>
                   <td className="row-actions">
-                    <button className="link" onClick={() => setEditing(u)}>Edit</button>
+                    <button className="link icon-action" aria-label={`Edit ${u.full_name}`} onClick={() => setEditing(u)}><Icon name="edit" size={16} />Edit</button>
                     <button
                       className="link"
                       disabled={toggleActive.isPending || u.id === profile?.id}
@@ -224,7 +223,7 @@ export default function UsersPage() {
         </div>
 
         <div className="head-row">
-          <span className="muted small">{total === 0 ? 'No results' : `Showing ${first}-${last} of ${total}`}</span>
+          <span className="muted small">{total === 0 ? '0 employees' : `Showing ${first}-${last} of ${total} employees`}</span>
           <div className="actions">
             <button className="secondary" disabled={page === 0 || employees.isFetching} onClick={() => setPage((p) => p - 1)}>Previous</button>
             <button className="secondary" disabled={!hasNext || employees.isFetching} onClick={() => setPage((p) => p + 1)}>Next</button>

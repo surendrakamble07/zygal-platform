@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useProjects, useStates } from '../lib/queries'
-import { useEngineers } from '../lib/job-queries'
-import { useFinalStatuses } from '../lib/job-queries'
+import { useEmployees, useFinalStatuses } from '../lib/job-queries'
 import {
   fetchJobReportForExport,
+  useEmployeeProductivity,
   useEngineerStats,
   useJobReport,
   useMaterialReport,
   type ReportFilters,
 } from '../lib/report-queries'
 import { downloadCsv } from '../lib/csv'
+import StatusBadge from '../components/StatusBadge'
+import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 
 const PAGE_SIZE = 25
 const EMPTY_FILTERS: ReportFilters = {
@@ -17,12 +20,26 @@ const EMPTY_FILTERS: ReportFilters = {
   dateTo: '',
   projectId: '',
   stateName: '',
-  engineerId: '',
+  employeeId: '',
   finalStatus: '',
   branchCode: '',
 }
 
-type Tab = 'jobs' | 'hardware' | 'engineers'
+type Tab = 'jobs' | 'hardware' | 'engineers' | 'productivity'
+
+function currentMonthRange() {
+  const today = new Date()
+  const toDateInput = (date: Date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  return {
+    from: toDateInput(new Date(today.getFullYear(), today.getMonth(), 1)),
+    to: toDateInput(today),
+  }
+}
 
 export default function ReportsPage() {
   const [tab, setTab] = useState<Tab>('jobs')
@@ -42,22 +59,30 @@ export default function ReportsPage() {
         <button className={tab === 'engineers' ? 'tab active' : 'tab'} onClick={() => setTab('engineers')}>
           Engineer productivity
         </button>
+        <button className={tab === 'productivity' ? 'tab active' : 'tab'} onClick={() => setTab('productivity')}>
+          Productivity
+        </button>
       </div>
 
       {tab === 'jobs' && <JobReportTab />}
       {tab === 'hardware' && <HardwareReportTab />}
       {tab === 'engineers' && <EngineerReportTab />}
+      {tab === 'productivity' && <EmployeeProductivityTab />}
     </section>
   )
 }
 
 function JobReportTab() {
+  const [searchParams] = useSearchParams()
   const projects = useProjects()
   const states = useStates()
-  const engineers = useEngineers()
+  const employees = useEmployees()
   const finalStatuses = useFinalStatuses()
 
-  const [filters, setFilters] = useState<ReportFilters>(EMPTY_FILTERS)
+  const [filters, setFilters] = useState<ReportFilters>(() => ({
+    ...EMPTY_FILTERS,
+    projectId: searchParams.get('projectId') ?? '',
+  }))
   const [page, setPage] = useState(0)
   const [exporting, setExporting] = useState(false)
   const [exportNote, setExportNote] = useState('')
@@ -116,10 +141,12 @@ function JobReportTab() {
             <option key={s.name} value={s.name}>{s.name}</option>
           ))}
         </select>
-        <select value={filters.engineerId} onChange={(e) => setFilter('engineerId', e.target.value)}>
-          <option value="">All engineers</option>
-          {(engineers.data ?? []).map((e) => (
-            <option key={e.id} value={e.id}>{e.full_name}</option>
+        <select value={filters.employeeId} onChange={(e) => setFilter('employeeId', e.target.value)}>
+          <option value="">All employees</option>
+          {(employees.data ?? []).map((employee) => (
+            <option key={employee.id} value={employee.id}>
+              {employee.full_name}{employee.is_active ? '' : ' (Inactive)'}
+            </option>
           ))}
         </select>
         <select value={filters.finalStatus} onChange={(e) => setFilter('finalStatus', e.target.value)}>
@@ -131,7 +158,7 @@ function JobReportTab() {
       </div>
 
       <div className="head-row">
-        <span className="muted small">{total === 0 ? 'No results' : `Showing ${first}-${last} of ${total}`}</span>
+        <span className="muted small">{total === 0 ? 'No matching records' : `Showing ${first}-${last} of ${total}`}</span>
         <button className="secondary" onClick={exportCsv} disabled={exporting || total === 0}>
           {exporting ? 'Preparing CSV...' : 'Export to CSV'}
         </button>
@@ -148,8 +175,8 @@ function JobReportTab() {
             </tr>
           </thead>
           <tbody>
-            {report.isLoading && <tr><td colSpan={10} className="muted">Loading...</td></tr>}
-            {!report.isLoading && rows.length === 0 && <tr><td colSpan={10} className="muted">No jobs match these filters.</td></tr>}
+            {report.isLoading && <TableSkeleton columns={10} />}
+            {!report.isLoading && rows.length === 0 && <TableEmptyState columns={10} message="No jobs match these filters." />}
             {rows.map((r) => (
               <tr key={r.job_no}>
                 <td>#{r.job_no}</td>
@@ -159,8 +186,8 @@ function JobReportTab() {
                 <td>{r.project_name}</td>
                 <td>{r.state ?? '-'}</td>
                 <td>{r.engineer_name ?? 'Not assigned'}</td>
-                <td>{r.handover_status}</td>
-                <td>{r.final_status}</td>
+                <td><StatusBadge status={r.handover_status} /></td>
+                <td><StatusBadge status={r.final_status} /></td>
                 <td>{r.has_minor_issue ? 'Yes' : ''}</td>
               </tr>
             ))}
@@ -222,15 +249,15 @@ function HardwareReportTab() {
       <div className="table-wrap">
         <table>
           <thead>
-            <tr><th>Job #</th><th>Date</th><th>Branch</th><th>Item</th><th>Problem</th><th>Qty</th><th>Status</th></tr>
+            <tr><th>Job #</th><th>Date</th><th>Branch</th><th>Item</th><th>Problem</th><th className="numeric">Qty</th><th>Status</th></tr>
           </thead>
           <tbody>
-            {report.isLoading && <tr><td colSpan={7} className="muted">Loading...</td></tr>}
-            {!report.isLoading && rows.length === 0 && <tr><td colSpan={7} className="muted">No matching issues.</td></tr>}
+            {report.isLoading && <TableSkeleton columns={7} />}
+            {!report.isLoading && rows.length === 0 && <TableEmptyState columns={7} message="No matching material issues." />}
             {rows.map((r, i) => (
               <tr key={i}>
                 <td>#{r.job_no}</td><td>{r.job_date}</td><td>{r.branch_code}</td>
-                <td>{r.item}</td><td>{r.problem}</td><td>{r.quantity}</td><td>{r.status}</td>
+                <td>{r.item}</td><td>{r.problem}</td><td className="numeric">{r.quantity}</td><td><StatusBadge status={r.status} /></td>
               </tr>
             ))}
           </tbody>
@@ -273,18 +300,83 @@ function EngineerReportTab() {
       <div className="table-wrap">
         <table>
           <thead>
-            <tr><th>Engineer</th><th>Total jobs</th><th>Completed / Live</th><th>Completion rate</th><th>Handover still pending</th></tr>
+            <tr><th>Engineer</th><th className="numeric">Total jobs</th><th className="numeric">Completed / Live</th><th className="numeric">Completion rate</th><th className="numeric">Handover still pending</th></tr>
           </thead>
           <tbody>
-            {stats.isLoading && <tr><td colSpan={5} className="muted">Loading...</td></tr>}
-            {!stats.isLoading && withRate.length === 0 && <tr><td colSpan={5} className="muted">No jobs in this date range.</td></tr>}
+            {stats.isLoading && <TableSkeleton columns={5} />}
+            {!stats.isLoading && withRate.length === 0 && <TableEmptyState columns={5} message="No jobs in this date range." />}
             {withRate.map((r) => (
               <tr key={r.engineer_id ?? 'unassigned'}>
                 <td>{r.engineer_name}</td>
-                <td>{r.total_jobs}</td>
-                <td>{r.completed_jobs}</td>
-                <td>{r.rate}%</td>
-                <td>{r.pending_handover}</td>
+                <td className="numeric">{r.total_jobs}</td>
+                <td className="numeric">{r.completed_jobs}</td>
+                <td className="numeric">{r.rate}%</td>
+                <td className="numeric">{r.pending_handover}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
+
+function EmployeeProductivityTab() {
+  const currentMonth = currentMonthRange()
+  const [dateFrom, setDateFrom] = useState(currentMonth.from)
+  const [dateTo, setDateTo] = useState(currentMonth.to)
+  const report = useEmployeeProductivity(dateFrom, dateTo)
+  const rows = report.data ?? []
+
+  function exportCsv() {
+    const exportRows = rows.map((row) => ({
+      'Full Name': row.full_name,
+      Role: row.role.replace(/_/g, ' '),
+      'Account Status': row.is_active ? 'Active' : 'Inactive',
+      'Jobs Created': row.jobs_created,
+      'Jobs Completed / Live': row.completed_jobs,
+      'Active Time': row.active_time,
+      'Login Days': row.login_days,
+    }))
+    downloadCsv(`zygal-employee-productivity-${new Date().toISOString().slice(0, 10)}.csv`, exportRows)
+  }
+
+  return (
+    <>
+      <div className="filters">
+        <label className="date-field">From<input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label>
+        <label className="date-field">To<input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>
+      </div>
+
+      <div className="head-row">
+        <span className="muted small">{rows.length} employee{rows.length === 1 ? '' : 's'}</span>
+        <button className="secondary" disabled={rows.length === 0} onClick={exportCsv}>
+          Export to CSV
+        </button>
+      </div>
+      {report.isError && <div className="banner error">Could not load employee productivity. Please refresh and try again.</div>}
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Employee</th><th>Role</th><th>Account status</th>
+              <th className="numeric">Jobs created</th><th className="numeric">Jobs completed / live</th>
+              <th className="numeric">Active time</th><th className="numeric">Login days</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.isLoading && <TableSkeleton columns={7} />}
+            {!report.isLoading && rows.length === 0 && <TableEmptyState columns={7} message="No employees found." />}
+            {rows.map((row) => (
+              <tr key={row.profile_id}>
+                <td>{row.full_name}</td>
+                <td>{row.role.replace(/_/g, ' ')}</td>
+                <td><StatusBadge status={row.is_active ? 'Active' : 'Inactive'} /></td>
+                <td className="numeric">{row.jobs_created}</td>
+                <td className="numeric">{row.completed_jobs}</td>
+                <td className="numeric">{row.active_time}</td>
+                <td className="numeric">{row.login_days}</td>
               </tr>
             ))}
           </tbody>
