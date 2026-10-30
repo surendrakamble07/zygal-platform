@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import Icon from '../components/Icon'
+import Avatar from '../components/Avatar'
 import StatusBadge from '../components/StatusBadge'
 import { supabase } from '../lib/supabase'
 
@@ -364,7 +365,10 @@ export default function LogsPage() {
             {visible.map((activity) => (
               <li className="log-entry" key={activity.id}>
                 <StatusBadge status={activity.badge} />
-                <span className="log-message">{activity.message}</span>
+                <span className="log-message">
+                  <Avatar name={activity.person} />
+                  {activity.message}
+                </span>
                 <time className="log-time" dateTime={activity.timestamp} title={new Date(activity.timestamp).toLocaleString()}>
                   {relativeTime(activity.timestamp)}
                 </time>

@@ -6,6 +6,7 @@ import { useProjects, useProjectTypes, useStates } from '../lib/queries'
 import type { Site } from '../lib/types'
 import Icon from '../components/Icon'
 import StatusBadge from '../components/StatusBadge'
+import Pagination from '../components/Pagination'
 import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 import SiteForm from './SiteForm'
 
@@ -62,10 +63,6 @@ export default function SitesPage() {
 
   const rows = sites.data?.rows ?? []
   const total = sites.data?.total ?? 0
-  const first = total === 0 ? 0 : page * PAGE_SIZE + 1
-  const last = Math.min((page + 1) * PAGE_SIZE, total)
-  const hasNext = (page + 1) * PAGE_SIZE < total
-
   return (
     <>
       <section className="card">
@@ -168,19 +165,7 @@ export default function SitesPage() {
           </table>
         </div>
 
-        <div className="head-row">
-          <span className="muted small">
-            {total === 0 ? '0 sites' : `Showing ${first}-${last} of ${total} sites`}
-          </span>
-          <div className="actions">
-            <button className="secondary" disabled={page === 0 || sites.isFetching} onClick={() => setPage((p) => p - 1)}>
-              Previous
-            </button>
-            <button className="secondary" disabled={!hasNext || sites.isFetching} onClick={() => setPage((p) => p + 1)}>
-              Next
-            </button>
-          </div>
-        </div>
+        <Pagination currentPage={page} totalItems={total} pageSize={PAGE_SIZE} onPageChange={setPage} disabled={sites.isFetching} itemLabel="sites" />
       </section>
 
       {adding && <SiteForm site={null} onClose={() => setAdding(false)} />}

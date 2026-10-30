@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { Fragment, useEffect, useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import type { Device } from '../lib/device-types'
@@ -11,16 +11,16 @@ interface Props {
 
 function friendlyError(err: unknown): string {
   const code = (err as { code?: string } | null)?.code
-  if (code === '23505') return 'An active device with this SIM number or MAC ID already exists.'
+  if (code === '23505') return 'An active SIM card with this number or MAC ID already exists.'
   if (code === '42501') return 'You do not have permission to do this.'
-  return 'Could not save the device. Please try again.'
+  return 'Could not save the SIM card. Please try again.'
 }
 
 const FIELDS: { key: keyof Device; label: string }[] = [
   { key: 'sim_name', label: 'SIM name (e.g. JIO, JIOM2M)' },
   { key: 'sim_number', label: 'SIM number' },
   { key: 'link_ip', label: 'Link IP' },
-  { key: 'link_mac_id', label: 'Link device MAC ID' },
+  { key: 'link_mac_id', label: 'Link MAC ID' },
   { key: 'vault_tam', label: 'Vault TAM' },
   { key: 'cash_counter_tam', label: 'Cash counter TAM' },
   { key: 'main_door_tam', label: 'Main door TAM' },
@@ -51,6 +51,7 @@ export default function DeviceForm({ siteId, device, onClose }: Props) {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['devices', 'by-site', siteId] })
+      void qc.invalidateQueries({ queryKey: ['devices-all'] })
       onClose()
     },
     onError: (err) => setError(friendlyError(err)),
@@ -73,18 +74,20 @@ export default function DeviceForm({ siteId, device, onClose }: Props) {
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={device ? 'Edit device' : 'Add device'}>
-        <h2>{device ? 'Edit device' : 'Add device'}</h2>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={device ? 'Edit SIM card' : 'Add SIM card'}>
+        <h2>{device ? 'Edit SIM card' : 'Add SIM card'}</h2>
         <form onSubmit={submit} noValidate className="grid-form">
           {FIELDS.map((f) => (
-            <label key={f.key}>
-              <span className="field-caption">{f.label} <span className="field-optional">Optional</span></span>
-              <input
-                value={values[f.key]}
-                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                maxLength={120}
-              />
-            </label>
+            <Fragment key={f.key}>
+              <label>
+                <span className="field-caption">{f.key === 'link_mac_id' ? 'Link MAC ID' : f.label} <span className="field-optional">Optional</span></span>
+                <input
+                  value={values[f.key]}
+                  onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                  maxLength={120}
+                />
+              </label>
+            </Fragment>
           ))}
 
           <label>
@@ -107,7 +110,7 @@ export default function DeviceForm({ siteId, device, onClose }: Props) {
               Cancel
             </button>
             <button type="submit" disabled={save.isPending}>
-              {save.isPending ? 'Saving...' : device ? 'Save changes' : 'Add device'}
+              {save.isPending ? 'Saving...' : device ? 'Save changes' : 'Add SIM card'}
             </button>
           </div>
         </form>

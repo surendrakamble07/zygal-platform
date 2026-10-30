@@ -17,10 +17,10 @@ const ROLE_LABEL: Record<Role, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  Completed: "var(--zy-green)",
+  Completed: "var(--zy-blue)",
   Live: "var(--zy-green)",
-  WIP: "var(--zy-blue)",
-  "Partially Live": "var(--zy-orange)",
+  WIP: "#ff0000",
+  "Partially Live": "#8b5cf6",
   Pending: "var(--err)",
   Other: "var(--muted)",
 };
@@ -224,10 +224,16 @@ export default function HomePage() {
 
   if (!profile) return null;
 
-  const maxCount = Math.max(
-    1,
-    ...(stats.data?.byFinalStatus.map((s) => s.count) ?? [1]),
-  );
+  const statusRows = stats.data?.byFinalStatus ?? [];
+  const totalStatusCount = statusRows.reduce((total, row) => total + row.count, 0);
+  const circumference = 2 * Math.PI * 48;
+  let chartOffset = 0;
+  const statusSegments = statusRows.map((row) => {
+    const length = totalStatusCount ? (row.count / totalStatusCount) * circumference : 0;
+    const segment = { ...row, length, offset: chartOffset };
+    chartOffset += length;
+    return segment;
+  });
 
   return (
     <>
@@ -284,22 +290,45 @@ export default function HomePage() {
               <span>No jobs logged yet this month.</span>
             </div>
           )}
-          <div className="bar-chart">
-            {stats.data?.byFinalStatus.map((s) => (
-              <div className="bar-row" key={s.name}>
-                <span className="bar-label">{s.name}</span>
-                <div className="bar-track">
-                  <div
-                    className="bar-fill"
-                    style={{
-                      width: `${(s.count / maxCount) * 100}%`,
-                      background: STATUS_COLORS[s.name] ?? "var(--zy-blue)",
-                    }}
+          <div className="status-donut-layout">
+            <div className="status-donut-wrap">
+              <svg
+                className="status-donut"
+                viewBox="0 0 120 120"
+                role="img"
+                aria-label={`Final status breakdown, ${totalStatusCount} jobs`}
+              >
+                <circle className="status-donut-track" cx="60" cy="60" r="48" />
+                <g transform="rotate(-90 60 60)">
+                  {statusSegments.map((segment) => (
+                    <circle
+                      key={segment.name}
+                      className="status-donut-segment"
+                      cx="60"
+                      cy="60"
+                      r="48"
+                      stroke={STATUS_COLORS[segment.name] ?? "var(--zy-blue)"}
+                      strokeDasharray={`${segment.length} ${circumference - segment.length}`}
+                      strokeDashoffset={-segment.offset}
+                    />
+                  ))}
+                </g>
+              </svg>
+              <span className="status-donut-total" aria-hidden="true">{totalStatusCount}</span>
+            </div>
+            <ul className="status-donut-legend">
+              {statusRows.map((row) => (
+                <li key={row.name}>
+                  <span
+                    className="status-donut-swatch"
+                    style={{ background: STATUS_COLORS[row.name] ?? "var(--zy-blue)" }}
+                    aria-hidden="true"
                   />
-                </div>
-                <span className="bar-count">{s.count}</span>
-              </div>
-            ))}
+                  <span>{row.name}</span>
+                  <strong>{row.count}</strong>
+                </li>
+              ))}
+            </ul>
           </div>
         </section>
 

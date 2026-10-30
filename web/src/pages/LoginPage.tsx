@@ -73,80 +73,90 @@ export default function LoginPage() {
 
   return (
     <main className="login-wrap">
-      <div className="login-card">
-        <div className="login-brand">
-          <LogoFull width={170} />
-        </div>
-        <h1>Team Operations</h1>
-        <p
-          className="muted small"
-          style={{ textAlign: "center", marginTop: -8 }}
-        >
-          Sign in with your office email
-        </p>
+      <div className="login-layout">
+        <div className="login-card">
+          <div className="login-brand">
+            <LogoFull width={170} />
+          </div>
+          <h1>Team Operations</h1>
+          <p
+            className="muted small"
+            style={{ textAlign: "center", marginTop: -8 }}
+          >
+            Sign in with your office email
+          </p>
 
-        {notice && <div className="banner warn">{notice}</div>}
+          {notice && <div className="banner warn">{notice}</div>}
 
-        {step === "email" ? (
-          <form onSubmit={sendCode} noValidate>
-            <label htmlFor="email">Official email</label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="email"
-              autoFocus
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="name@zygal.io"
-              disabled={busy}
-            />
-            {error && <div className="banner error">{error}</div>}
-            <button type="submit" disabled={busy}>
-              {busy ? "Sending..." : "Send code"}
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={submitCode} noValidate>
-            <p className="muted small">
-              Code sent to <strong>{cleanEmail}</strong>
-            </p>
-            {info && <div className="banner info">{info}</div>}
-            <label htmlFor="code">One-time code</label>
-            <input
-              id="code"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              autoFocus
-              maxLength={8}
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-              placeholder="12345678"
-              disabled={busy}
-            />
-            {error && <div className="banner error">{error}</div>}
-            <button type="submit" disabled={busy}>
-              {busy ? "Checking..." : "Verify and sign in"}
-            </button>
-            <div className="row">
-              <button
-                type="button"
-                className="link"
-                disabled={busy || cooldown > 0}
-                onClick={() => void sendCode()}
-              >
-                {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
-              </button>
-              <button
-                type="button"
-                className="link"
-                onClick={changeEmail}
+          {step === "email" ? (
+            <form onSubmit={sendCode} noValidate>
+              <label htmlFor="email">Official email</label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                autoFocus
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="name@zygal.io"
                 disabled={busy}
-              >
-                Use a different email
+              />
+              {error && <div className="banner error">{error}</div>}
+              <button type="submit" disabled={busy}>
+                {busy ? "Sending..." : "Send code"}
               </button>
+            </form>
+          ) : (
+            <form onSubmit={submitCode} noValidate>
+              <p className="muted small">
+                Code sent to <strong>{cleanEmail}</strong>
+              </p>
+              {info && <div className="banner info">{info}</div>}
+              <label htmlFor="code">One-time code</label>
+              <input
+                id="code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoFocus
+                maxLength={8}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                placeholder="12345678"
+                disabled={busy}
+              />
+              {error && <div className="banner error">{error}</div>}
+              <button type="submit" disabled={busy}>
+                {busy ? "Checking..." : "Verify and sign in"}
+              </button>
+              <div className="row">
+                <button
+                  type="button"
+                  className="link"
+                  disabled={busy || cooldown > 0}
+                  onClick={() => void sendCode()}
+                >
+                  {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
+                </button>
+                <button
+                  type="button"
+                  className="link"
+                  onClick={changeEmail}
+                  disabled={busy}
+                >
+                  Use a different email
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+        <aside className="login-side-panel">
+          <div className="login-side-content">
+            <div className="login-side-logo">
+              <LogoFull width={240} />
             </div>
-          </form>
-        )}
+            <p>Manage installations, support calls, and site data — all in one place.</p>
+          </div>
+        </aside>
       </div>
     </main>
   );

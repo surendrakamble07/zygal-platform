@@ -11,4 +11,5 @@ export interface Device {
   ngl_main_door_tam: string | null
   device_status: 'Active' | 'Replaced'
   notes: string | null
+  sim_photo_path: string | null
 }

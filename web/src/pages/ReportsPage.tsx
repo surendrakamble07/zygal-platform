@@ -19,6 +19,8 @@ import {
 } from '../lib/report-queries'
 import { downloadCsv } from '../lib/csv'
 import StatusBadge from '../components/StatusBadge'
+import Avatar from '../components/Avatar'
+import Pagination from '../components/Pagination'
 import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 
 const PAGE_SIZE = 25
@@ -262,7 +264,6 @@ function JobReportTab({ filters, onFiltersChange }: JobReportTabProps) {
   const total = report.data?.total ?? 0
   const first = total === 0 ? 0 : page * PAGE_SIZE + 1
   const last = Math.min((page + 1) * PAGE_SIZE, total)
-  const hasNext = (page + 1) * PAGE_SIZE < total
 
   function setFilter<K extends keyof ReportFilters>(key: K, value: ReportFilters[K]) {
     onFiltersChange({ ...filters, [key]: value })
@@ -355,7 +356,9 @@ function JobReportTab({ filters, onFiltersChange }: JobReportTabProps) {
                 <td>{r.branch_code}</td>
                 <td>{r.project_name}</td>
                 <td>{r.state ?? '-'}</td>
-                <td>{r.engineer_name ?? 'Not assigned'}</td>
+                <td>{r.engineer_name
+                  ? <span className="person-cell"><Avatar name={r.engineer_name} />{r.engineer_name}</span>
+                  : 'Not assigned'}</td>
                 <td><StatusBadge status={r.handover_status} /></td>
                 <td><StatusBadge status={r.final_status} /></td>
                 <td>{r.has_minor_issue ? 'Yes' : ''}</td>
@@ -365,10 +368,7 @@ function JobReportTab({ filters, onFiltersChange }: JobReportTabProps) {
         </table>
       </div>
 
-      <div className="actions">
-        <button className="secondary" disabled={page === 0 || report.isFetching} onClick={() => setPage((p) => p - 1)}>Previous</button>
-        <button className="secondary" disabled={!hasNext || report.isFetching} onClick={() => setPage((p) => p + 1)}>Next</button>
-      </div>
+      <Pagination currentPage={page} totalItems={total} pageSize={PAGE_SIZE} onPageChange={setPage} disabled={report.isFetching} itemLabel="jobs" />
     </>
   )
 }
@@ -477,7 +477,7 @@ function EngineerReportTab() {
             {!stats.isLoading && withRate.length === 0 && <TableEmptyState columns={5} message="No jobs in this date range." />}
             {withRate.map((r) => (
               <tr key={r.engineer_id ?? 'unassigned'}>
-                <td>{r.engineer_name}</td>
+                <td><span className="person-cell"><Avatar name={r.engineer_name} />{r.engineer_name}</span></td>
                 <td className="numeric">{r.total_jobs}</td>
                 <td className="numeric">{r.completed_jobs}</td>
                 <td className="numeric">{r.rate}%</td>
@@ -540,7 +540,7 @@ function EmployeeProductivityTab() {
             {!report.isLoading && rows.length === 0 && <TableEmptyState columns={7} message="No employees found." />}
             {rows.map((row) => (
               <tr key={row.profile_id}>
-                <td>{row.full_name}</td>
+                <td><span className="person-cell"><Avatar name={row.full_name} />{row.full_name}</span></td>
                 <td>{row.role.replace(/_/g, ' ')}</td>
                 <td><StatusBadge status={row.is_active ? 'Active' : 'Inactive'} /></td>
                 <td className="numeric">{row.jobs_created}</td>

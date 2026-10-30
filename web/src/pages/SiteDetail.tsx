@@ -3,14 +3,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useProjects, useProjectTypes } from '../lib/queries'
-import { useDevicesForSite } from '../lib/device-queries'
 import type { Site } from '../lib/types'
-import type { Device } from '../lib/device-types'
-import Icon from '../components/Icon'
+import Avatar from '../components/Avatar'
 import StatusBadge from '../components/StatusBadge'
 import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 import SiteForm from './SiteForm'
-import DeviceForm from './DeviceForm'
 
 interface SiteJob {
   id: string
@@ -69,13 +66,10 @@ export default function SiteDetail() {
   const qc = useQueryClient()
   const site = useSite(siteId)
   const jobs = useSiteJobs(siteId)
-  const devices = useDevicesForSite(siteId)
   const projects = useProjects()
   const types = useProjectTypes()
 
   const [editingSite, setEditingSite] = useState(false)
-  const [addingDevice, setAddingDevice] = useState(false)
-  const [editingDevice, setEditingDevice] = useState<Device | null>(null)
 
   if (site.isLoading) {
     return (
@@ -119,42 +113,6 @@ export default function SiteDetail() {
       </section>
 
       <section className="card">
-        <div className="head-row">
-          <h3>Devices</h3>
-          <button onClick={() => setAddingDevice(true)}><Icon name="plus" size={17} />Add device</button>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr><th>SIM</th><th>Link IP</th><th>MAC ID</th><th>Vault TAM</th><th>Cash TAM</th><th>Main door TAM</th><th>Status</th><th /></tr>
-            </thead>
-            <tbody>
-              {devices.isLoading && <TableSkeleton columns={8} />}
-              {!devices.isLoading && (devices.data ?? []).length === 0 && (
-                <TableEmptyState
-                  columns={8}
-                  message="No devices are recorded for this site yet."
-                  action={<button onClick={() => setAddingDevice(true)}><Icon name="plus" size={16} />Add device</button>}
-                />
-              )}
-              {(devices.data ?? []).map((d) => (
-                <tr key={d.id}>
-                  <td>{d.sim_name ?? '-'}</td>
-                  <td>{d.link_ip ?? '-'}</td>
-                  <td>{d.link_mac_id ?? '-'}</td>
-                  <td>{d.vault_tam ?? '-'}</td>
-                  <td>{d.cash_counter_tam ?? '-'}</td>
-                  <td>{d.main_door_tam ?? '-'}</td>
-                  <td><StatusBadge status={d.device_status} /></td>
-                  <td><button className="link icon-action" aria-label={`Edit device ${d.sim_name ?? ''}`} onClick={() => setEditingDevice(d)}><Icon name="edit" size={16} />Edit</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="card">
         <h3>Job history</h3>
         <p className="muted small">Every job ever logged for this site, most recent first.</p>
         <div className="table-wrap">
@@ -172,7 +130,9 @@ export default function SiteDetail() {
                   <td><Link to={`/jobs/${j.id}`}>#{j.job_no}</Link></td>
                   <td>{j.job_date}</td>
                   <td>{j.call_type}</td>
-                  <td>{j.engineer_name ?? 'Not assigned'}</td>
+                  <td>{j.engineer_name
+                    ? <span className="person-cell"><Avatar name={j.engineer_name} />{j.engineer_name}</span>
+                    : 'Not assigned'}</td>
                   <td><StatusBadge status={j.handover_status} /></td>
                   <td><StatusBadge status={j.final_status} /></td>
                 </tr>
@@ -192,8 +152,6 @@ export default function SiteDetail() {
           }}
         />
       )}
-      {addingDevice && <DeviceForm siteId={s.id} device={null} onClose={() => setAddingDevice(false)} />}
-      {editingDevice && <DeviceForm siteId={s.id} device={editingDevice} onClose={() => setEditingDevice(null)} />}
     </>
   )
 }

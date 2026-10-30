@@ -14,7 +14,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: 'dashboard' },
   { to: '/sites', label: 'Sites', icon: 'sites' },
-  { to: '/devices', label: 'Devices', icon: 'devices' },
+  { to: '/devices', label: 'SIM Cards', icon: 'devices' },
   { to: '/jobs', label: 'Jobs', icon: 'jobs' },
   { to: '/reports', label: 'Reports', icon: 'reports', roles: ['team_lead', 'admin'] },
   { to: '/logs', label: 'Logs', icon: 'logs', roles: ['team_lead', 'admin'] },

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/auth-context";
@@ -77,7 +77,22 @@ interface MaterialDraft {
 class JobFormValidationError extends Error {}
 
 const NEW_DEVICE = "__new_device__";
+const SIM_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+const SIM_PHOTO_TYPES: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  heic: "image/heic",
+};
 const todayStr = () => new Date().toISOString().slice(0, 10);
+function simPhotoExtension(file: File): string | null {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const expectedType = SIM_PHOTO_TYPES[extension];
+  if (!expectedType || (file.type && file.type !== expectedType)) return null;
+  return extension;
+}
+
 function coordinateValue(text: string): number | null {
   const clean = text.trim();
   if (!clean) return null;
@@ -100,7 +115,11 @@ function deviceValues(device?: Device) {
 
 function friendlySaveError(err: unknown): string {
   if (err instanceof JobFormValidationError) return err.message;
-  if (err instanceof Error && err.message.startsWith("Job saved, but"))
+  if (
+    err instanceof Error &&
+    (err.message.startsWith("Job saved, but") ||
+      err.message.startsWith("Job saved and the photo uploaded"))
+  )
     return err.message;
   return friendlyJobError(err);
 }
@@ -151,6 +170,10 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
   const [persistedDeviceId, setPersistedDeviceId] = useState<string | null>(
     null,
   );
+  const [simPhotoFile, setSimPhotoFile] = useState<File | null>(null);
+  const [simPhotoError, setSimPhotoError] = useState("");
+  const [uploadingSimPhoto, setUploadingSimPhoto] = useState(false);
+  const simPhotoInputRef = useRef<HTMLInputElement>(null);
   const [materialDrafts, setMaterialDrafts] = useState<MaterialDraft[]>([]);
   const [error, setError] = useState("");
   const [persistedJobId, setPersistedJobId] = useState<string | null>(null);
@@ -245,6 +268,32 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
   const deviceFields = currentDeviceDraft
     ? currentDeviceDraft.fields
     : deviceValues(defaultDevice);
+  const selectedDevice = activeDevices.find(
+    (device) => device.id === selectedDeviceId,
+  );
+  const simPhotoPreview = useMemo(
+    () => simPhotoFile ? URL.createObjectURL(simPhotoFile) : null,
+    [simPhotoFile],
+  );
+  useEffect(() => {
+    return () => {
+      if (simPhotoPreview) URL.revokeObjectURL(simPhotoPreview);
+    };
+  }, [simPhotoPreview]);
+  const selectedPhotoPath = selectedDevice?.sim_photo_path ?? null;
+  const selectedPhoto = useQuery({
+    queryKey: ["job-form-sim-photo", selectedPhotoPath],
+    enabled: !!selectedPhotoPath && !simPhotoFile,
+    queryFn: async () => {
+      if (!selectedPhotoPath) throw new Error("No SIM photo is selected.");
+      const { data, error: storageError } = await supabase.storage
+        .from("sim-photos")
+        .createSignedUrl(selectedPhotoPath, 3600);
+      if (storageError) throw storageError;
+      return data.signedUrl;
+    },
+  });
+  const simPhotoUrl = simPhotoPreview ?? selectedPhoto.data ?? null;
 
   function updateSiteDraft(patch: Partial<Omit<SiteDraft, "siteId">>) {
     if (!loadedSite) return;
@@ -285,6 +334,27 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
   function chooseDevice(deviceId: string) {
     const selected = activeDevices.find((device) => device.id === deviceId);
     setDeviceDraft({ siteId, deviceId, fields: deviceValues(selected) });
+    setSimPhotoFile(null);
+    setSimPhotoError("");
+  }
+
+  function chooseSimPhoto(file: File | null) {
+    setSimPhotoError("");
+    if (!file) {
+      setSimPhotoFile(null);
+      return;
+    }
+    if (file.size > SIM_PHOTO_MAX_BYTES) {
+      setSimPhotoFile(null);
+      setSimPhotoError("SIM photo must be 5 MB or smaller.");
+      return;
+    }
+    if (!simPhotoExtension(file)) {
+      setSimPhotoFile(null);
+      setSimPhotoError("Choose a JPG, PNG, WebP, or HEIC image.");
+      return;
+    }
+    setSimPhotoFile(file);
   }
 
   function updateDeviceField<K extends keyof DeviceFields>(
@@ -355,9 +425,6 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
         );
       }
 
-      const selectedDevice = activeDevices.find(
-        (device) => device.id === selectedDeviceId,
-      );
       const existingDeviceId =
         selectedDevice?.id ??
         (selectedDeviceId === persistedDeviceId ? persistedDeviceId : null);
@@ -498,7 +565,9 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
 
       const shouldSaveDevice =
         !!existingDeviceId ||
-        (selectedDeviceId === NEW_DEVICE && hasDeviceValues);
+        (selectedDeviceId === NEW_DEVICE &&
+          (hasDeviceValues || !!simPhotoFile));
+      let savedDeviceId = existingDeviceId;
       if (shouldSaveDevice) {
         const deviceResult = existingDeviceId
           ? await supabase
@@ -521,6 +590,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
         }
         if (!existingDeviceId && deviceResult.data) {
           const createdDeviceId = deviceResult.data.id;
+          savedDeviceId = createdDeviceId;
           setPersistedDeviceId(createdDeviceId);
           setDeviceDraft({
             siteId,
@@ -528,6 +598,45 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
             fields: deviceFields,
           });
         }
+      }
+
+      if (simPhotoFile) {
+        if (!savedDeviceId) {
+          throw new JobFormValidationError(
+            "Select or create a SIM record before uploading its photo.",
+          );
+        }
+        const extension = simPhotoExtension(simPhotoFile);
+        if (!extension) {
+          throw new JobFormValidationError(
+            "Choose a JPG, PNG, WebP, or HEIC image.",
+          );
+        }
+        const photoPath = `${siteId}/${savedDeviceId}.${extension}`;
+        setUploadingSimPhoto(true);
+        const { error: uploadError } = await supabase.storage
+          .from("sim-photos")
+          .upload(photoPath, simPhotoFile, {
+            contentType: simPhotoFile.type || SIM_PHOTO_TYPES[extension],
+            upsert: true,
+          });
+        if (uploadError) {
+          throw new Error(
+            `Job saved, but the SIM photo could not be uploaded: ${uploadError.message}`,
+          );
+        }
+        const { error: photoPathError } = await supabase
+          .from("devices")
+          .update({ sim_photo_path: photoPath })
+          .eq("id", savedDeviceId);
+        if (photoPathError) {
+          throw new Error(
+            "Job saved and the photo uploaded, but it could not be linked to the SIM record. Please retry.",
+          );
+        }
+        setUploadingSimPhoto(false);
+        void qc.invalidateQueries({ queryKey: ["devices", "by-site", siteId] });
+        void qc.invalidateQueries({ queryKey: ["devices-all"] });
       }
 
       const issuesToInsert = materialDrafts
@@ -553,6 +662,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
       return savedJobId;
     },
     onSuccess: (id) => {
+      setUploadingSimPhoto(false);
       void qc.invalidateQueries({ queryKey: ["jobs"] });
       void qc.invalidateQueries({ queryKey: ["site", siteId] });
       void qc.invalidateQueries({ queryKey: ["sites"] });
@@ -562,13 +672,17 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
       if (!job) onSaved?.(id);
       onClose();
     },
-    onError: (err) => setError(friendlySaveError(err)),
+    onError: (err) => {
+      setUploadingSimPhoto(false);
+      setError(friendlySaveError(err));
+    },
   });
 
   function submit(e: FormEvent) {
     e.preventDefault();
     if (save.isPending) return;
     setError("");
+    setSimPhotoError("");
 
     if (!jobDate) return setError("Pick the job date.");
     if (!callType) return setError("Choose a call type.");
@@ -595,6 +709,12 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
       return setError("Choose a project type for this site.");
     if (!callTakenBy) return setError("Choose who took the call.");
     if (!finalStatus) return setError("Choose a final status.");
+    if (simPhotoFile && !selectedDeviceId)
+      return setSimPhotoError("Choose a device record before uploading a SIM photo.");
+    if (simPhotoFile && simPhotoFile.size > SIM_PHOTO_MAX_BYTES)
+      return setSimPhotoError("SIM photo must be 5 MB or smaller.");
+    if (simPhotoFile && !simPhotoExtension(simPhotoFile))
+      return setSimPhotoError("Choose a JPG, PNG, WebP, or HEIC image.");
 
     const incompleteMaterial = materialDrafts.find(
       (material) =>
@@ -975,6 +1095,65 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                       </label>
                     ))}
                   </div>
+                  <div className="sim-photo-field full">
+                    <span className="field-caption">
+                      SIM card photo{" "}
+                      <span className="field-optional">Optional</span>
+                    </span>
+                    <input
+                      ref={simPhotoInputRef}
+                      className="sim-photo-input"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/heic,.jpg,.jpeg,.png,.webp,.heic"
+                      disabled={!selectedDeviceId || save.isPending}
+                      onChange={(event) => {
+                        chooseSimPhoto(event.currentTarget.files?.[0] ?? null);
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="secondary sim-photo-choose"
+                      disabled={!selectedDeviceId || save.isPending}
+                      onClick={() => simPhotoInputRef.current?.click()}
+                    >
+                      {simPhotoFile
+                        ? "Choose a different photo"
+                        : selectedPhotoPath
+                          ? "Replace photo"
+                          : "Choose photo"}
+                    </button>
+                    <span className="hint sim-photo-help">
+                      {simPhotoFile?.name ??
+                        "JPG, PNG, WebP, or HEIC · Maximum 5 MB. Saved to the selected SIM card."}
+                    </span>
+                    {simPhotoUrl && (
+                      <span className="sim-photo-preview-wrap">
+                        <img
+                          className="sim-photo-preview"
+                          src={simPhotoUrl}
+                          alt="SIM card photo preview"
+                          onError={(event) => {
+                            event.currentTarget.hidden = true;
+                            setSimPhotoError("SIM photo preview could not be displayed.");
+                          }}
+                        />
+                      </span>
+                    )}
+                    {selectedPhoto.isError && !simPhotoFile && (
+                      <span className="hint bad">
+                        Could not load the saved SIM photo.
+                      </span>
+                    )}
+                    {simPhotoError && (
+                      <span className="hint bad" role="alert">
+                        {simPhotoError}
+                      </span>
+                    )}
+                    {uploadingSimPhoto && (
+                      <span className="hint">Uploading SIM photo...</span>
+                    )}
+                  </div>
                 </>
               )}
             </fieldset>
@@ -1169,7 +1348,9 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                 }
               >
                 {save.isPending
-                  ? "Saving..."
+                  ? uploadingSimPhoto
+                    ? "Uploading SIM photo..."
+                    : "Saving..."
                   : job || persistedJobId
                     ? "Save changes"
                     : "Save job details"}

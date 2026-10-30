@@ -4,7 +4,9 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { jobsSelect, useCallTypes, useFinalStatuses, useHandoverStatuses, type JoinedJob } from '../lib/job-queries'
 import Icon from '../components/Icon'
+import Avatar from '../components/Avatar'
 import StatusBadge from '../components/StatusBadge'
+import Pagination from '../components/Pagination'
 import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 import JobForm from './JobForm'
 
@@ -69,8 +71,8 @@ const COLUMNS: JobColumn[] = [
   { id: 'cashCounterTam', label: 'Cash Counter TAM', render: (j) => j.cashCounterTam ?? '-' },
   { id: 'mainDoorTam', label: 'Main Door TAM', render: (j) => j.mainDoorTam ?? '-' },
   { id: 'nglMainDoor', label: 'NGL Main Door', render: (j) => j.nglMainDoor ?? '-' },
-  { id: 'takenBy', label: 'Call Taken By', render: (j) => j.takenBy ?? '-' },
-  { id: 'engineerName', label: 'Engineer Name', defaultVisible: true, render: (j) => j.engineerName ?? 'Not assigned' },
+  { id: 'takenBy', label: 'Call Taken By', render: (j) => j.takenBy ? <span className="person-cell"><Avatar name={j.takenBy} />{j.takenBy}</span> : '-' },
+  { id: 'engineerName', label: 'Engineer Name', defaultVisible: true, render: (j) => j.engineerName ? <span className="person-cell"><Avatar name={j.engineerName} />{j.engineerName}</span> : 'Not assigned' },
   { id: 'engineerNumber', label: 'Engineer Number', render: (j) => j.engineerNumber ?? '-' },
   {
     id: 'remark',
@@ -201,9 +203,6 @@ export default function JobsPage() {
 
   const rows = jobs.data?.rows ?? []
   const total = jobs.data?.total ?? 0
-  const first = total === 0 ? 0 : page * PAGE_SIZE + 1
-  const last = Math.min((page + 1) * PAGE_SIZE, total)
-  const hasNext = (page + 1) * PAGE_SIZE < total
   const shownColumns = COLUMNS.filter((column) => visibleColumns.includes(column.id))
 
   function toggleColumn(columnId: string) {
@@ -322,13 +321,7 @@ export default function JobsPage() {
           </table>
         </div>
 
-        <div className="head-row">
-          <span className="muted small">{total === 0 ? '0 jobs' : `Showing ${first}-${last} of ${total} jobs`}</span>
-          <div className="actions">
-            <button className="secondary" disabled={page === 0 || jobs.isFetching} onClick={() => setPage((p) => p - 1)}>Previous</button>
-            <button className="secondary" disabled={!hasNext || jobs.isFetching} onClick={() => setPage((p) => p + 1)}>Next</button>
-          </div>
-        </div>
+        <Pagination currentPage={page} totalItems={total} pageSize={PAGE_SIZE} onPageChange={setPage} disabled={jobs.isFetching} itemLabel="jobs" />
       </section>
 
       {adding && <JobForm job={null} onClose={() => setAdding(false)} />}

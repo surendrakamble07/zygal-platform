@@ -10,7 +10,7 @@ export function useDevicesForSite(siteId: string | undefined) {
       const { data, error } = await supabase
         .from('devices')
         .select(
-          'id, site_id, sim_name, sim_number, link_ip, link_mac_id, vault_tam, cash_counter_tam, main_door_tam, ngl_main_door_tam, device_status, notes',
+          'id, site_id, sim_name, sim_number, link_ip, link_mac_id, vault_tam, cash_counter_tam, main_door_tam, ngl_main_door_tam, device_status, notes, sim_photo_path',
         )
         .eq('site_id', siteId)
         .is('deleted_at', null)

@@ -5,7 +5,9 @@ import { useAuth } from '../auth/auth-context'
 import { callProvision } from '../lib/user-queries'
 import type { EmployeeRow, Role } from '../lib/user-types'
 import Icon from '../components/Icon'
+import Avatar from '../components/Avatar'
 import StatusBadge from '../components/StatusBadge'
+import Pagination from '../components/Pagination'
 import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 import UserForm from './UserForm'
 
@@ -76,7 +78,10 @@ function OnlineNow() {
             {rows.map((r) => (
               <tr key={r.session_id}>
                 <td>
-                  <span className="dot-online" aria-hidden="true" /> {r.full_name}
+                  <span className="person-cell">
+                    <Avatar name={r.full_name} />
+                    <span><span className="dot-online" aria-hidden="true" /> {r.full_name}</span>
+                  </span>
                 </td>
                 <td>{new Date(r.started_at).toLocaleTimeString()}</td>
                 <td>{timeAgo(r.last_active_at)}</td>
@@ -141,10 +146,6 @@ export default function UsersPage() {
 
   const rows = employees.data?.rows ?? []
   const total = employees.data?.total ?? 0
-  const first = total === 0 ? 0 : page * PAGE_SIZE + 1
-  const last = Math.min((page + 1) * PAGE_SIZE, total)
-  const hasNext = (page + 1) * PAGE_SIZE < total
-
   return (
     <>
       <OnlineNow />
@@ -201,7 +202,7 @@ export default function UsersPage() {
               )}
               {rows.map((u) => (
                 <tr key={u.id}>
-                  <td>{u.full_name}</td>
+                  <td><span className="person-cell"><Avatar name={u.full_name} />{u.full_name}</span></td>
                   <td>{u.email}</td>
                   <td>{ROLE_LABEL[u.role]}</td>
                   <td>{u.job_title ?? '-'}</td>
@@ -222,13 +223,7 @@ export default function UsersPage() {
           </table>
         </div>
 
-        <div className="head-row">
-          <span className="muted small">{total === 0 ? '0 employees' : `Showing ${first}-${last} of ${total} employees`}</span>
-          <div className="actions">
-            <button className="secondary" disabled={page === 0 || employees.isFetching} onClick={() => setPage((p) => p - 1)}>Previous</button>
-            <button className="secondary" disabled={!hasNext || employees.isFetching} onClick={() => setPage((p) => p + 1)}>Next</button>
-          </div>
-        </div>
+        <Pagination currentPage={page} totalItems={total} pageSize={PAGE_SIZE} onPageChange={setPage} disabled={employees.isFetching} itemLabel="employees" />
       </section>
 
       {adding && <UserForm employee={null} onClose={() => setAdding(false)} />}
