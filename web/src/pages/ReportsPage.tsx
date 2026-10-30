@@ -1,9 +1,16 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import type { WorkBook } from 'xlsx'
+import { useAuth } from '../auth/auth-context'
 import { useProjects, useStates } from '../lib/queries'
 import { useEmployees, useFinalStatuses } from '../lib/job-queries'
+import { fetchProjectDashboard, type ProjectDashboardRow } from '../lib/dashboard-queries'
 import {
+  fetchEmployeeProductivity,
+  fetchEngineerStats,
   fetchJobReportForExport,
+  fetchMaterialReport,
+  JOB_REPORT_EXPORT_HEADERS,
   useEmployeeProductivity,
   useEngineerStats,
   useJobReport,
@@ -41,14 +48,177 @@ function currentMonthRange() {
   }
 }
 
+type ReportCell = string | number | boolean | null | undefined
+
+function appendReportSheet(
+  xlsx: typeof import('xlsx'),
+  workbook: WorkBook,
+  name: string,
+  title: string,
+  subtitle: string,
+  headers: readonly string[],
+  rows: ReportCell[][],
+) {
+  const sheet = xlsx.utils.aoa_to_sheet([[title], [subtitle], [], [...headers], ...rows])
+  xlsx.utils.book_append_sheet(workbook, sheet, name)
+}
+
+function summarizeProjects(rows: ProjectDashboardRow[]) {
+  const grouped = new Map<string, {
+    project_name: string
+    total_sites: number
+    live_sites: number
+    pending_sites: number
+    handover_pending_sites: number
+    material_pending_sites: number
+  }>()
+
+  for (const row of rows) {
+    if (row.total_sites < 1) continue
+    let project = grouped.get(row.project_id)
+    if (!project) {
+      project = {
+        project_name: row.project_name,
+        total_sites: 0,
+        live_sites: 0,
+        pending_sites: 0,
+        handover_pending_sites: 0,
+        material_pending_sites: 0,
+      }
+      grouped.set(row.project_id, project)
+    }
+    project.total_sites += row.total_sites
+    project.live_sites += row.live_sites
+    project.pending_sites += row.pending_sites
+    project.handover_pending_sites += row.handover_pending_sites
+    project.material_pending_sites += row.material_pending_sites
+  }
+
+  return [...grouped.values()].sort(
+    (a, b) => b.total_sites - a.total_sites || a.project_name.localeCompare(b.project_name),
+  )
+}
+
+function formatExportDate(date: Date): string {
+  const month = date.toLocaleString('en', { month: 'short' })
+  const day = String(date.getDate()).padStart(2, '0')
+  const year = date.getFullYear()
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${day}-${month}-${year} ${hours}:${minutes}`
+}
+
+function localDateStamp(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
 export default function ReportsPage() {
   const [tab, setTab] = useState<Tab>('jobs')
+  const [searchParams] = useSearchParams()
+  const { profile } = useAuth()
+  const [jobFilters, setJobFilters] = useState<ReportFilters>(() => ({
+    ...EMPTY_FILTERS,
+    projectId: searchParams.get('projectId') ?? '',
+  }))
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState('')
+  const [exportNote, setExportNote] = useState('')
+  const canExport = profile?.role === 'admin' || profile?.role === 'team_lead'
+
+  async function exportFullReport() {
+    if (!profile) {
+      setExportError('Could not prepare the full report: your user profile is unavailable.')
+      return
+    }
+    setExporting(true)
+    setExportError('')
+    setExportNote('')
+    try {
+      const [projectRows, jobExport, materialRows, engineerRows, employeeRows] = await Promise.all([
+        fetchProjectDashboard(),
+        fetchJobReportForExport(jobFilters),
+        fetchMaterialReport({
+          dateFrom: jobFilters.dateFrom,
+          dateTo: jobFilters.dateTo,
+          projectId: jobFilters.projectId,
+          stateName: jobFilters.stateName,
+        }, false),
+        fetchEngineerStats(jobFilters.dateFrom, jobFilters.dateTo),
+        fetchEmployeeProductivity(jobFilters.dateFrom, jobFilters.dateTo),
+      ])
+      const XLSX = await import('xlsx')
+      const exportedAt = formatExportDate(new Date())
+      const title = 'ZYGAL Team Operations — Full Report'
+      const subtitle = `Exported by ${profile.full_name} on ${exportedAt}`
+      const workbook = XLSX.utils.book_new()
+      const summary = summarizeProjects(projectRows)
+      const summaryHeaders = ['Project', 'Total Sites', 'Live', 'Pending', 'Handover Pending', 'Material Pending']
+      appendReportSheet(XLSX, workbook, 'Summary', title, subtitle, summaryHeaders, summary.map((project) => [
+        project.project_name,
+        project.total_sites,
+        project.live_sites,
+        project.pending_sites,
+        project.handover_pending_sites,
+        project.material_pending_sites,
+      ]))
+      appendReportSheet(
+        XLSX,
+        workbook,
+        'Jobs',
+        title,
+        subtitle,
+        JOB_REPORT_EXPORT_HEADERS,
+        jobExport.rows.map((row) => JOB_REPORT_EXPORT_HEADERS.map((header) => row[header])),
+      )
+      appendReportSheet(XLSX, workbook, 'Material Issues', title, subtitle,
+        ['Job #', 'Date', 'Branch', 'Item', 'Problem', 'Quantity', 'Status'],
+        materialRows.map((row) => [row.job_no, row.job_date, row.branch_code, row.item, row.problem, row.quantity, row.status]))
+      appendReportSheet(XLSX, workbook, 'Engineer Productivity', title, subtitle,
+        ['Engineer', 'Total jobs', 'Completed / Live', 'Completion rate', 'Handover still pending'],
+        engineerRows.map((row) => [
+          row.engineer_name,
+          row.total_jobs,
+          row.completed_jobs,
+          `${row.total_jobs ? Math.round((row.completed_jobs / row.total_jobs) * 100) : 0}%`,
+          row.pending_handover,
+        ]))
+      appendReportSheet(XLSX, workbook, 'Employee Productivity', title, subtitle,
+        ['Full Name', 'Role', 'Account Status', 'Jobs Created', 'Jobs Completed / Live', 'Active Time', 'Login Days'],
+        employeeRows.map((row) => [
+          row.full_name,
+          row.role.replace(/_/g, ' '),
+          row.is_active ? 'Active' : 'Inactive',
+          row.jobs_created,
+          row.completed_jobs,
+          row.active_time,
+          row.login_days,
+        ]))
+      XLSX.writeFile(workbook, `zygal-full-report-${localDateStamp(new Date())}.xlsx`)
+      if (jobExport.truncated) {
+        setExportNote('The Jobs sheet is limited to the first 5,000 matching rows. Narrow the Job data filters for a complete export.')
+      }
+    } catch (error) {
+      const details = error instanceof Error ? error.message : String(error)
+      setExportError(`Could not prepare the full report: ${details}`)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   return (
     <section className="card">
       <div className="head-row">
         <h2>Reports</h2>
+        {canExport && (
+          <button className="secondary" onClick={exportFullReport} disabled={exporting}>
+            {exporting ? 'Preparing report...' : 'Export full report (Excel)'}
+          </button>
+        )}
       </div>
+      {exportError && <div className="banner error" role="alert">{exportError}</div>}
+      {exportNote && <div className="banner warn">{exportNote}</div>}
       <div className="tab-row">
         <button className={tab === 'jobs' ? 'tab active' : 'tab'} onClick={() => setTab('jobs')}>
           Job data
@@ -64,7 +234,7 @@ export default function ReportsPage() {
         </button>
       </div>
 
-      {tab === 'jobs' && <JobReportTab />}
+      {tab === 'jobs' && <JobReportTab filters={jobFilters} onFiltersChange={setJobFilters} />}
       {tab === 'hardware' && <HardwareReportTab />}
       {tab === 'engineers' && <EngineerReportTab />}
       {tab === 'productivity' && <EmployeeProductivityTab />}
@@ -72,17 +242,17 @@ export default function ReportsPage() {
   )
 }
 
-function JobReportTab() {
-  const [searchParams] = useSearchParams()
+type JobReportTabProps = {
+  filters: ReportFilters
+  onFiltersChange: (filters: ReportFilters) => void
+}
+
+function JobReportTab({ filters, onFiltersChange }: JobReportTabProps) {
   const projects = useProjects()
   const states = useStates()
   const employees = useEmployees()
   const finalStatuses = useFinalStatuses()
 
-  const [filters, setFilters] = useState<ReportFilters>(() => ({
-    ...EMPTY_FILTERS,
-    projectId: searchParams.get('projectId') ?? '',
-  }))
   const [page, setPage] = useState(0)
   const [exporting, setExporting] = useState(false)
   const [exportNote, setExportNote] = useState('')
@@ -95,7 +265,7 @@ function JobReportTab() {
   const hasNext = (page + 1) * PAGE_SIZE < total
 
   function setFilter<K extends keyof ReportFilters>(key: K, value: ReportFilters[K]) {
-    setFilters((f) => ({ ...f, [key]: value }))
+    onFiltersChange({ ...filters, [key]: value })
     setPage(0)
   }
 

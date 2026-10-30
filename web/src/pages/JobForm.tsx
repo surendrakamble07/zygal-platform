@@ -53,6 +53,7 @@ interface EngineerOption {
   id: string;
   full_name: string;
   phone: string | null;
+  is_active: boolean;
 }
 
 interface DeviceFields {
@@ -122,8 +123,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("engineers")
-        .select("id, full_name, phone")
-        .eq("is_active", true)
+        .select("id, full_name, phone, is_active")
         .order("full_name");
       if (error) throw error;
       return (data ?? []) as EngineerOption[];
@@ -136,7 +136,8 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
   const [callTakenBy, setCallTakenBy] = useState(
     job?.call_taken_by ?? profile?.id ?? "",
   );
-  const [engineerId, setEngineerId] = useState(job?.engineer_id ?? "");
+  const [engineerNameDraft, setEngineerNameDraft] = useState<string | null>(null);
+  const [engineerNumberDraft, setEngineerNumberDraft] = useState<string | null>(null);
   const [handoverStatus, setHandoverStatus] = useState(
     job?.handover_status ?? "Pending",
   );
@@ -195,6 +196,21 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
     },
   });
   const devices = useDevicesForSite(siteId || undefined);
+  const assignedEngineer = engineers.data?.find(
+    (engineer) => engineer.id === job?.engineer_id,
+  );
+  const engineerName = engineerNameDraft ?? assignedEngineer?.full_name ?? "";
+  const matchingEngineer = engineers.data?.find(
+    (engineer) =>
+      engineer.full_name.trim().toLocaleLowerCase()
+      === engineerName.trim().toLocaleLowerCase(),
+  );
+  const engineerNumber = engineerNumberDraft
+    ?? (matchingEngineer
+      ? matchingEngineer.phone ?? ""
+      : engineerNameDraft === null
+        ? assignedEngineer?.phone ?? ""
+        : "");
   const activeDevices = (devices.data ?? []).filter(
     (device) => device.device_status === "Active",
   );
@@ -370,6 +386,48 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
         );
       }
 
+      const cleanEngineerName = engineerName.trim();
+      const cleanEngineerNumber = engineerNumber.trim();
+      if (!cleanEngineerName && cleanEngineerNumber) {
+        throw new JobFormValidationError(
+          "Enter the engineer's name when providing an engineer number.",
+        );
+      }
+
+      let savedEngineerId: string | null = null;
+      if (cleanEngineerName) {
+        const existingEngineer = engineers.data?.find(
+          (engineer) =>
+            engineer.full_name.trim().toLocaleLowerCase()
+            === cleanEngineerName.toLocaleLowerCase(),
+        );
+        if (existingEngineer) {
+          savedEngineerId = existingEngineer.id;
+          if (
+            engineerNumberDraft !== null
+            && existingEngineer.phone !== (cleanEngineerNumber || null)
+          ) {
+            const { error: engineerError } = await supabase
+              .from("engineers")
+              .update({ phone: cleanEngineerNumber || null })
+              .eq("id", existingEngineer.id);
+            if (engineerError) throw engineerError;
+          }
+        } else {
+          const { data, error: engineerError } = await supabase
+            .from("engineers")
+            .insert({
+              full_name: cleanEngineerName,
+              phone: cleanEngineerNumber || null,
+            })
+            .select("id")
+            .single();
+          if (engineerError) throw engineerError;
+          savedEngineerId = data.id;
+          await qc.invalidateQueries({ queryKey: ["job-form-engineers"] });
+        }
+      }
+
       let savedJobId = job?.id ?? persistedJobId;
       if (!savedJobId) {
         const { data, error: insertError } = await supabase
@@ -379,7 +437,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
             call_type: callType,
             site_id: siteId,
             call_taken_by: callTakenBy,
-            engineer_id: engineerId || null,
+            engineer_id: savedEngineerId,
             handover_status: handoverStatus,
             final_status: finalStatus,
             has_minor_issue: hasMinorIssue,
@@ -398,7 +456,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
             call_type: callType,
             site_id: siteId,
             call_taken_by: callTakenBy,
-            engineer_id: engineerId || null,
+            engineer_id: savedEngineerId,
             handover_status: handoverStatus,
             final_status: finalStatus,
             has_minor_issue: hasMinorIssue,
@@ -590,9 +648,6 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
     projects.isError ||
     projectTypes.isError ||
     states.isError;
-  const selectedEngineer = engineers.data?.find(
-    (engineer) => engineer.id === engineerId,
-  );
   const isRuleCheckOk =
     (finalStatus === "Completed" || finalStatus === "Live") &&
     handoverStatus !== "Pending" &&
@@ -698,24 +753,24 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                   <span className="field-caption">
                     Engineer <span className="field-optional">Optional</span>
                   </span>
-                  <select
-                    value={engineerId}
-                    onChange={(e) => setEngineerId(e.target.value)}
-                  >
-                    <option value="">Not assigned yet</option>
-                    {engineers.data?.map((engineer) => (
-                      <option key={engineer.id} value={engineer.id}>
-                        {engineer.full_name}
-                      </option>
+                  <input
+                    list="job-form-engineer-names"
+                    value={engineerName}
+                    onChange={(e) => setEngineerNameDraft(e.target.value)}
+                    placeholder="Type engineer name"
+                  />
+                  <datalist id="job-form-engineer-names">
+                    {engineers.data?.filter((engineer) => engineer.is_active).map((engineer) => (
+                      <option key={engineer.id} value={engineer.full_name} />
                     ))}
-                  </select>
+                  </datalist>
                 </label>
                 <label>
                   <span className="field-caption">Engineer number</span>
                   <input
-                    value={selectedEngineer?.phone ?? ""}
-                    readOnly
-                    placeholder="Select an engineer"
+                    value={engineerNumber}
+                    onChange={(e) => setEngineerNumberDraft(e.target.value)}
+                    placeholder="Type engineer number"
                   />
                 </label>
               </div>

@@ -98,14 +98,16 @@ export function useDashboardStats() {
 export function useProjectDashboard() {
   return useQuery({
     queryKey: ['project-dashboard'],
-    queryFn: async (): Promise<ProjectDashboardRow[]> => {
-      const { data, error } = await supabase
-        .from('v_project_dashboard')
-        .select('*')
-
-      if (error) throw error
-      return (data ?? []) as ProjectDashboardRow[]
-    },
+    queryFn: fetchProjectDashboard,
     staleTime: 60_000,
   })
+}
+
+export async function fetchProjectDashboard(): Promise<ProjectDashboardRow[]> {
+  const { data, error } = await supabase
+    .from('v_project_dashboard')
+    .select('*')
+
+  if (error) throw error
+  return (data ?? []) as ProjectDashboardRow[]
 }

@@ -28,6 +28,32 @@ export interface JobMasterCsvRow {
   'Rule Validator Status': string
 }
 
+export const JOB_REPORT_EXPORT_HEADERS: (keyof JobMasterCsvRow)[] = [
+  'Date',
+  'Call Type',
+  'Project',
+  'Project Type',
+  'Branch Code',
+  'State',
+  'Longitude / Latitude',
+  'SIM Name',
+  'SIM Card No.',
+  'Link IP',
+  'Link Device MAC ID',
+  'Vault TAM',
+  'Cash Counter TAM',
+  'Main Door TAM',
+  'NGL Main Door',
+  'Call Taken By',
+  'Engineer Name',
+  'Engineer Number',
+  'Site Remark',
+  'Handover Status',
+  'Material Issue',
+  'Final Status',
+  'Rule Validator Status',
+]
+
 export interface JobReportRow {
   job_no: number
   job_date: string
@@ -209,35 +235,40 @@ export interface MaterialReportRow {
 export function useMaterialReport(filters: Pick<ReportFilters, 'dateFrom' | 'dateTo' | 'stateName' | 'projectId'>, pendingOnly: boolean) {
   return useQuery({
     queryKey: ['report-materials', filters, pendingOnly],
-    queryFn: async () => {
-      let q = supabase
-        .from('material_issues')
-        .select(
-          `item, problem, quantity, status,
-           job:jobs!inner ( job_no, job_date,
-             site:sites!inner ( branch_code, state, project_id ) )`,
-        )
-
-      if (pendingOnly) q = q.eq('status', 'Pending')
-      if (filters.dateFrom) q = q.gte('job.job_date', filters.dateFrom)
-      if (filters.dateTo) q = q.lte('job.job_date', filters.dateTo)
-      if (filters.stateName) q = q.eq('job.site.state', filters.stateName)
-      if (filters.projectId) q = q.eq('job.site.project_id', filters.projectId)
-
-      const { data, error } = await q.order('status', { ascending: false }).limit(1000)
-      if (error) throw error
-
-      return (data ?? []).map((r: any) => ({
-        job_no: r.job.job_no,
-        job_date: r.job.job_date,
-        branch_code: r.job.site.branch_code,
-        item: r.item,
-        problem: r.problem,
-        quantity: r.quantity,
-        status: r.status,
-      })) as MaterialReportRow[]
-    },
+    queryFn: () => fetchMaterialReport(filters, pendingOnly),
   })
+}
+
+export async function fetchMaterialReport(
+  filters: Pick<ReportFilters, 'dateFrom' | 'dateTo' | 'stateName' | 'projectId'>,
+  pendingOnly: boolean,
+): Promise<MaterialReportRow[]> {
+  let q = supabase
+    .from('material_issues')
+    .select(
+      `item, problem, quantity, status,
+       job:jobs!inner ( job_no, job_date,
+         site:sites!inner ( branch_code, state, project_id ) )`,
+    )
+
+  if (pendingOnly) q = q.eq('status', 'Pending')
+  if (filters.dateFrom) q = q.gte('job.job_date', filters.dateFrom)
+  if (filters.dateTo) q = q.lte('job.job_date', filters.dateTo)
+  if (filters.stateName) q = q.eq('job.site.state', filters.stateName)
+  if (filters.projectId) q = q.eq('job.site.project_id', filters.projectId)
+
+  const { data, error } = await q.order('status', { ascending: false }).limit(1000)
+  if (error) throw error
+
+  return (data ?? []).map((r: any) => ({
+    job_no: r.job.job_no,
+    job_date: r.job.job_date,
+    branch_code: r.job.site.branch_code,
+    item: r.item,
+    problem: r.problem,
+    quantity: r.quantity,
+    status: r.status,
+  })) as MaterialReportRow[]
 }
 
 export interface EngineerStat {
@@ -254,32 +285,34 @@ export interface EngineerStat {
 export function useEngineerStats(dateFrom: string, dateTo: string) {
   return useQuery({
     queryKey: ['report-engineer-stats', dateFrom, dateTo],
-    queryFn: async () => {
-      let q = supabase
-        .from('jobs')
-        .select('engineer_id, final_status, handover_status, engineer:engineers ( full_name )')
-        .is('deleted_at', null)
-      if (dateFrom) q = q.gte('job_date', dateFrom)
-      if (dateTo) q = q.lte('job_date', dateTo)
-
-      const { data, error } = await q.limit(20000)
-      if (error) throw error
-
-      const map = new Map<string, EngineerStat>()
-      for (const r of (data ?? []) as any[]) {
-        const key = r.engineer_id ?? 'unassigned'
-        const name = r.engineer?.full_name ?? 'Not assigned'
-        if (!map.has(key)) {
-          map.set(key, { engineer_id: r.engineer_id, engineer_name: name, total_jobs: 0, completed_jobs: 0, pending_handover: 0 })
-        }
-        const s = map.get(key)!
-        s.total_jobs += 1
-        if (r.final_status === 'Completed' || r.final_status === 'Live') s.completed_jobs += 1
-        if (r.handover_status === 'Pending') s.pending_handover += 1
-      }
-      return [...map.values()].sort((a, b) => b.total_jobs - a.total_jobs)
-    },
+    queryFn: () => fetchEngineerStats(dateFrom, dateTo),
   })
+}
+
+export async function fetchEngineerStats(dateFrom: string, dateTo: string): Promise<EngineerStat[]> {
+  let q = supabase
+    .from('jobs')
+    .select('engineer_id, final_status, handover_status, engineer:engineers ( full_name )')
+    .is('deleted_at', null)
+  if (dateFrom) q = q.gte('job_date', dateFrom)
+  if (dateTo) q = q.lte('job_date', dateTo)
+
+  const { data, error } = await q.limit(20000)
+  if (error) throw error
+
+  const map = new Map<string, EngineerStat>()
+  for (const r of (data ?? []) as any[]) {
+    const key = r.engineer_id ?? 'unassigned'
+    const name = r.engineer?.full_name ?? 'Not assigned'
+    if (!map.has(key)) {
+      map.set(key, { engineer_id: r.engineer_id, engineer_name: name, total_jobs: 0, completed_jobs: 0, pending_handover: 0 })
+    }
+    const s = map.get(key)!
+    s.total_jobs += 1
+    if (r.final_status === 'Completed' || r.final_status === 'Live') s.completed_jobs += 1
+    if (r.handover_status === 'Pending') s.pending_handover += 1
+  }
+  return [...map.values()].sort((a, b) => b.total_jobs - a.total_jobs)
 }
 
 export interface EmployeeProductivityRow {
@@ -306,7 +339,11 @@ function formatActiveTime(milliseconds: number): string {
 export function useEmployeeProductivity(dateFrom: string, dateTo: string) {
   return useQuery({
     queryKey: ['report-employee-productivity', dateFrom, dateTo],
-    queryFn: async () => {
+    queryFn: () => fetchEmployeeProductivity(dateFrom, dateTo),
+  })
+}
+
+export async function fetchEmployeeProductivity(dateFrom: string, dateTo: string): Promise<EmployeeProductivityRow[]> {
       let sessionsQuery = supabase
         .from('user_sessions')
         .select('user_id, started_at, ended_at')
@@ -393,6 +430,4 @@ export function useEmployeeProductivity(dateFrom: string, dateTo: string) {
           }
         })
         .sort((a, b) => b.jobs_created - a.jobs_created || a.full_name.localeCompare(b.full_name))
-    },
-  })
 }
