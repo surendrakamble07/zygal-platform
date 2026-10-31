@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useState, type FormEvent } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Fragment, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import type { Device } from '../lib/device-types'
 
@@ -27,6 +27,8 @@ const FIELDS: { key: keyof Device; label: string }[] = [
   { key: 'ngl_main_door_tam', label: 'NGL main door TAM' },
 ]
 
+const MAX_PHOTO_SIZE = 5 * 1024 * 1024
+
 export default function DeviceForm({ siteId, device, onClose }: Props) {
   const qc = useQueryClient()
   const [values, setValues] = useState<Record<string, string>>(() =>
@@ -35,6 +37,26 @@ export default function DeviceForm({ siteId, device, onClose }: Props) {
   const [status, setStatus] = useState<'Active' | 'Replaced'>(device?.device_status ?? 'Active')
   const [notes, setNotes] = useState(device?.notes ?? '')
   const [error, setError] = useState('')
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [removePhoto, setRemovePhoto] = useState(false)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const photoPath = device?.sim_photo_path ?? null
+  const savedPhoto = useQuery({
+    queryKey: ['device-form-sim-photo', photoPath],
+    enabled: !!photoPath,
+    queryFn: async () => {
+      if (!photoPath) throw new Error('No SIM photo is selected.')
+      const { data, error: photoError } = await supabase.storage
+        .from('sim-photos')
+        .createSignedUrl(photoPath, 3600)
+      if (photoError) throw photoError
+      return data.signedUrl
+    },
+  })
+  const photoPreview = useMemo(
+    () => photoFile ? URL.createObjectURL(photoFile) : null,
+    [photoFile],
+  )
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -42,11 +64,41 @@ export default function DeviceForm({ siteId, device, onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  useEffect(() => () => {
+    if (photoPreview) URL.revokeObjectURL(photoPreview)
+  }, [photoPreview])
+
   const save = useMutation({
     mutationFn: async (payload: Record<string, unknown>) => {
+      let simPhotoPath: string | null | undefined
+      if (photoFile) {
+        const extension = photoFile.name.split('.').pop()?.toLowerCase()
+        if (!extension || !/^[a-z0-9]{1,10}$/.test(extension)) {
+          throw new Error('Could not determine the photo file type. Please choose an image file.')
+        }
+        const path = `${siteId}/${crypto.randomUUID()}.${extension}`
+        setUploadingPhoto(true)
+        try {
+          const { error: uploadError } = await supabase.storage
+            .from('sim-photos')
+            .upload(path, photoFile, { contentType: photoFile.type || undefined })
+          if (uploadError) {
+            throw new Error(`Could not upload SIM photo: ${uploadError.message}`)
+          }
+        } finally {
+          setUploadingPhoto(false)
+        }
+        simPhotoPath = path
+      } else if (removePhoto) {
+        simPhotoPath = null
+      }
+
+      const savePayload = simPhotoPath === undefined
+        ? payload
+        : { ...payload, sim_photo_path: simPhotoPath }
       const { error: dbError } = device
-        ? await supabase.from('devices').update(payload).eq('id', device.id)
-        : await supabase.from('devices').insert({ ...payload, site_id: siteId })
+        ? await supabase.from('devices').update(savePayload).eq('id', device.id)
+        : await supabase.from('devices').insert({ ...savePayload, site_id: siteId })
       if (dbError) throw dbError
     },
     onSuccess: () => {
@@ -54,7 +106,11 @@ export default function DeviceForm({ siteId, device, onClose }: Props) {
       void qc.invalidateQueries({ queryKey: ['devices-all'] })
       onClose()
     },
-    onError: (err) => setError(friendlyError(err)),
+    onError: (err) => setError(
+      err instanceof Error && err.message.startsWith('Could not upload SIM photo:')
+        ? err.message
+        : friendlyError(err),
+    ),
   })
 
   function submit(e: FormEvent) {
@@ -65,6 +121,9 @@ export default function DeviceForm({ siteId, device, onClose }: Props) {
     const sim = values.sim_number.trim()
     if (sim && !/^[0-9]{18,22}$/.test(sim)) {
       return setError('SIM number must be 18 to 22 digits, with no spaces or symbols. Leave blank if unknown.')
+    }
+    if (photoFile && photoFile.size > MAX_PHOTO_SIZE) {
+      return setError('SIM photo must be 5 MB or smaller.')
     }
 
     const payload: Record<string, unknown> = { device_status: status, notes: notes.trim() || null }
@@ -87,6 +146,56 @@ export default function DeviceForm({ siteId, device, onClose }: Props) {
                   maxLength={120}
                 />
               </label>
+              {f.key === 'sim_number' && (
+                <div className="sim-photo-field">
+                  <label htmlFor="sim-photo">
+                    <span className="field-caption">SIM card photo <span className="field-optional">Optional</span></span>
+                    <input
+                      id="sim-photo"
+                      type="file"
+                      accept="image/*"
+                      disabled={save.isPending}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null
+                        e.target.value = ''
+                        if (file && file.size > MAX_PHOTO_SIZE) {
+                          setPhotoFile(null)
+                          setError('SIM photo must be 5 MB or smaller.')
+                          return
+                        }
+                        setError('')
+                        setPhotoFile(file)
+                        setRemovePhoto(false)
+                      }}
+                    />
+                  </label>
+                  {(photoPreview || (!removePhoto && savedPhoto.data)) && (
+                    <div className="sim-photo-preview-wrap">
+                      <img
+                        className="sim-photo-preview"
+                        src={photoPreview ?? savedPhoto.data}
+                        alt="SIM card photo preview"
+                      />
+                      {device?.sim_photo_path && !removePhoto && (
+                        <button
+                          type="button"
+                          className="link sim-photo-remove"
+                          disabled={save.isPending}
+                          onClick={() => {
+                            setPhotoFile(null)
+                            setRemovePhoto(true)
+                          }}
+                        >
+                          Remove photo
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {savedPhoto.isError && !photoFile && (
+                    <span className="hint bad">Could not load the saved SIM photo.</span>
+                  )}
+                </div>
+              )}
             </Fragment>
           ))}
 
@@ -110,7 +219,7 @@ export default function DeviceForm({ siteId, device, onClose }: Props) {
               Cancel
             </button>
             <button type="submit" disabled={save.isPending}>
-              {save.isPending ? 'Saving...' : device ? 'Save changes' : 'Add SIM card'}
+              {uploadingPhoto ? 'Uploading...' : save.isPending ? 'Saving...' : device ? 'Save changes' : 'Add SIM card'}
             </button>
           </div>
         </form>

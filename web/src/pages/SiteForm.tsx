@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useProjects, useProjectTypes, useStates } from '../lib/queries'
@@ -25,6 +25,44 @@ function parseCoord(text: string): number | null {
   return Number.isFinite(n) ? n : NaN
 }
 
+function coordinatesFromMapLink(value: string): { latitude: number; longitude: number } | null {
+  const pinned = value.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/i)
+  if (pinned) {
+    return { latitude: Number(pinned[1]), longitude: Number(pinned[2]) }
+  }
+
+  const pair = /(-?\d+(?:\.\d+)?)\s*(?:,|%2c)\s*(-?\d+(?:\.\d+)?)/i
+  const matchPair = (text: string) => {
+    const match = text.match(pair)
+    return match ? { latitude: Number(match[1]), longitude: Number(match[2]) } : null
+  }
+
+  try {
+    const url = new URL(value)
+    for (const key of ['query', 'q', 'll', 'center']) {
+      const coordinates = matchPair(url.searchParams.get(key) ?? '')
+      if (coordinates) return coordinates
+    }
+  } catch {
+    // Continue with coordinate formats that do not require a fully qualified URL.
+  }
+
+  const viewport = value.match(/@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/)
+  if (viewport) {
+    return { latitude: Number(viewport[1]), longitude: Number(viewport[2]) }
+  }
+  return null
+}
+
+interface ReverseGeocodeResult {
+  address?: {
+    state?: string
+    state_district?: string
+    region?: string
+    province?: string
+  }
+}
+
 export default function SiteForm({ site, onClose }: Props) {
   const qc = useQueryClient()
   const projects = useProjects()
@@ -40,6 +78,10 @@ export default function SiteForm({ site, onClose }: Props) {
   const [lng, setLng] = useState(site?.longitude != null ? String(site.longitude) : '')
   const [status, setStatus] = useState<'Active' | 'Inactive'>(site?.status ?? 'Active')
   const [error, setError] = useState('')
+  const [mapLink, setMapLink] = useState('')
+  const [locationLookup, setLocationLookup] = useState('')
+  const [lookingUpLocation, setLookingUpLocation] = useState(false)
+  const locationRequest = useRef<AbortController | null>(null)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -48,6 +90,75 @@ export default function SiteForm({ site, onClose }: Props) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  useEffect(() => () => locationRequest.current?.abort(), [])
+
+  async function extractLocation(value: string) {
+    locationRequest.current?.abort()
+    const controller = new AbortController()
+    locationRequest.current = controller
+    setLookingUpLocation(false)
+    setLocationLookup('')
+
+    const coordinates = coordinatesFromMapLink(value.trim())
+    if (!coordinates) {
+      setLocationLookup('Could not find coordinates in that map link. Paste a Google Maps link with a location pin.')
+      return
+    }
+    if (coordinates.latitude < 6 || coordinates.latitude > 38 || coordinates.longitude < 68 || coordinates.longitude > 98) {
+      setLocationLookup('The map coordinates are outside India. Check the link or enter the location manually.')
+      return
+    }
+
+    setLat(String(coordinates.latitude))
+    setLng(String(coordinates.longitude))
+    setStateName('')
+    setLookingUpLocation(true)
+    setLocationLookup('Coordinates found. Looking up state...')
+
+    try {
+      const params = new URLSearchParams({
+        format: 'jsonv2',
+        lat: String(coordinates.latitude),
+        lon: String(coordinates.longitude),
+        zoom: '10',
+        addressdetails: '1',
+      })
+      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      })
+      if (!response.ok) throw new Error('Reverse lookup failed')
+      const result = await response.json() as ReverseGeocodeResult
+      if (controller.signal.aborted) return
+
+      const candidates = [
+        result.address?.state,
+        result.address?.state_district,
+        result.address?.region,
+        result.address?.province,
+      ].filter((candidate): candidate is string => !!candidate)
+      const match = (states.data ?? []).find((state) =>
+        candidates.some((candidate) => candidate.toLocaleLowerCase() === state.name.toLocaleLowerCase()),
+      )
+      if (!match) {
+        setLocationLookup('Coordinates found, but the state could not be matched. Please select the state manually.')
+        return
+      }
+
+      setStateName(match.name)
+      setLocationLookup(`Location found: ${match.name}`)
+    } catch (lookupError) {
+      if (controller.signal.aborted) return
+      setLocationLookup(
+        lookupError instanceof Error && lookupError.message !== 'Reverse lookup failed'
+          ? `Could not look up the state: ${lookupError.message}. Select the state manually.`
+          : 'Coordinates found, but state lookup failed. Select the state manually.',
+      )
+    } finally {
+      if (!controller.signal.aborted) setLookingUpLocation(false)
+    }
+  }
 
   const typeOptions = useMemo(
     () => (types.data ?? []).filter((t) => t.project_id === projectId && (t.is_active || t.id === typeId)),
@@ -70,7 +181,7 @@ export default function SiteForm({ site, onClose }: Props) {
 
   function submit(e: FormEvent) {
     e.preventDefault()
-    if (save.isPending) return
+    if (save.isPending || lookingUpLocation) return
     setError('')
 
     const code = branchCode.trim()
@@ -153,6 +264,42 @@ export default function SiteForm({ site, onClose }: Props) {
               <input value={branchName} onChange={(e) => setBranchName(e.target.value)} maxLength={120} />
             </label>
 
+            <div className="full">
+              <label htmlFor="site-map-link">
+                <span className="field-caption">Google Maps link <span className="field-optional">Optional</span></span>
+                <input
+                  id="site-map-link"
+                  type="url"
+                  value={mapLink}
+                  onChange={(e) => setMapLink(e.target.value)}
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData.getData('text').trim()
+                    if (!pasted) return
+                    e.preventDefault()
+                    setMapLink(pasted)
+                    void extractLocation(pasted)
+                  }}
+                  placeholder="Paste a Google Maps link to fill location details"
+                  disabled={lookingUpLocation}
+                />
+              </label>
+              <div className="row site-map-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => void extractLocation(mapLink)}
+                  disabled={!mapLink.trim() || lookingUpLocation}
+                >
+                  {lookingUpLocation ? 'Looking up location...' : 'Extract location'}
+                </button>
+                {locationLookup && (
+                  <span className={`hint ${locationLookup.startsWith('Location found:') ? 'ok' : locationLookup.startsWith('Coordinates found, but') || locationLookup.startsWith('Could not') || locationLookup.startsWith('The map') ? 'bad' : ''}`} role="status">
+                    {locationLookup}
+                  </span>
+                )}
+              </div>
+            </div>
+
             <label>
               <span className="field-caption">State <span className="field-required">*</span></span>
               <select aria-required="true" value={stateName} onChange={(e) => setStateName(e.target.value)}>
@@ -189,8 +336,8 @@ export default function SiteForm({ site, onClose }: Props) {
               <button type="button" className="secondary" onClick={onClose} disabled={save.isPending}>
                 Cancel
               </button>
-              <button type="submit" disabled={save.isPending}>
-                {save.isPending ? 'Saving...' : 'Save site'}
+              <button type="submit" disabled={save.isPending || lookingUpLocation}>
+                {lookingUpLocation ? 'Looking up location...' : save.isPending ? 'Saving...' : 'Save site'}
               </button>
             </div>
           </form>

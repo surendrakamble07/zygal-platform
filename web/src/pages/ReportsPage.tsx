@@ -214,10 +214,10 @@ export default function ReportsPage() {
           Job data
         </button>
         <button className={tab === 'hardware' ? 'tab active' : 'tab'} onClick={() => setTab('hardware')}>
-          Hardware / material issues
+          Hardware
         </button>
         <button className={tab === 'productivity' ? 'tab active' : 'tab'} onClick={() => setTab('productivity')}>
-          Employee Productivity
+          Productivity
         </button>
       </div>
 

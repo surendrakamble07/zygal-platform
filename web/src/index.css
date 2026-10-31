@@ -599,6 +599,11 @@ a.link:hover {
   gap: 8px;
   flex-wrap: wrap;
 }
+.site-map-actions {
+  align-items: center;
+  justify-content: flex-start;
+  margin-top: 8px;
+}
 .banner {
   padding: 12px 14px;
   border-radius: 11px;
@@ -649,6 +654,79 @@ a.link:hover {
 .who {
   font-size: 0.9rem;
 }
+.topbar-action {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--card) 88%, var(--bg));
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(28, 54, 45, 0.045);
+  transition:
+    transform var(--transition-ui),
+    border-color var(--transition-ui),
+    background var(--transition-ui),
+    box-shadow var(--transition-ui),
+    color var(--transition-ui);
+}
+.topbar-action:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 14px rgba(28, 54, 45, 0.1);
+}
+.topbar-action:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--zy-blue) 36%, transparent);
+  outline-offset: 2px;
+}
+.topbar-action-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  padding: 6px;
+  border-radius: 9px;
+}
+.topbar-action-icon svg,
+svg.topbar-action-icon {
+  width: 100%;
+  height: 100%;
+  flex-shrink: 0;
+}
+.guide-action {
+  border-color: color-mix(in srgb, var(--zy-blue) 18%, var(--border));
+}
+.guide-action .guide-icon {
+  color: var(--zy-blue-dark);
+  background: color-mix(in srgb, var(--zy-blue) 11%, var(--card));
+}
+.guide-action:hover {
+  color: var(--zy-blue-dark);
+  border-color: color-mix(in srgb, var(--zy-blue) 42%, var(--border));
+  background: color-mix(in srgb, var(--zy-blue) 5%, var(--card));
+}
+.topbar-action-arrow {
+  width: 14px;
+  height: 14px;
+  margin-left: 1px;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.58;
+  transition: transform var(--transition-ui), opacity var(--transition-ui);
+}
+.guide-action:hover .topbar-action-arrow {
+  transform: translate(2px, -2px);
+  opacity: 1;
+}
 .brand-word {
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -656,10 +734,37 @@ a.link:hover {
   font-size: 1rem;
 }
 .theme-toggle {
-  min-height: 38px;
+  border-color: color-mix(in srgb, var(--zy-green) 24%, var(--border));
 }
-.theme-toggle svg {
-  flex-shrink: 0;
+.theme-toggle .theme-icon {
+  width: 32px;
+  height: 32px;
+  padding: 7px;
+  color: #96621a;
+  background: color-mix(in srgb, var(--zy-orange) 18%, var(--card));
+  transition: transform 260ms ease, color var(--transition-ui);
+}
+.theme-toggle:hover .theme-icon {
+  transform: rotate(-12deg) scale(1.08);
+  color: var(--zy-green-dark);
+}
+.logout-action {
+  border-color: color-mix(in srgb, var(--err) 18%, var(--border));
+  color: var(--err);
+  background: color-mix(in srgb, var(--err-bg) 48%, var(--card));
+}
+.logout-action .logout-icon {
+  color: var(--err);
+  background: color-mix(in srgb, var(--err) 11%, var(--card));
+  transition: transform var(--transition-ui);
+}
+.logout-action:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--err) 38%, var(--border));
+  color: var(--err);
+  background: color-mix(in srgb, var(--err-bg) 76%, var(--card));
+}
+.logout-action:hover:not(:disabled) .logout-icon {
+  transform: translateX(2px);
 }
 
 .body {
