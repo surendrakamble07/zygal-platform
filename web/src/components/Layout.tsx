@@ -66,7 +66,7 @@ export default function Layout() {
             <span className="muted">· {ROLE_LABEL[profile.role]}</span>
           </span>
           <a
-            href="/zygal-user-guide.pdf"
+            href="/ZYGAL_User_Guide.pdf"
             target="_blank"
             rel="noopener"
             className="topbar-action guide-action"
