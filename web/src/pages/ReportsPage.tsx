@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type { WorkBook } from 'xlsx'
 import { useAuth } from '../auth/auth-context'
@@ -7,12 +7,10 @@ import { useEmployees, useFinalStatuses } from '../lib/job-queries'
 import { fetchProjectDashboard, type ProjectDashboardRow } from '../lib/dashboard-queries'
 import {
   fetchEmployeeProductivity,
-  fetchEngineerStats,
   fetchJobReportForExport,
   fetchMaterialReport,
   JOB_REPORT_EXPORT_HEADERS,
   useEmployeeProductivity,
-  useEngineerStats,
   useJobReport,
   useMaterialReport,
   type ReportFilters,
@@ -34,7 +32,7 @@ const EMPTY_FILTERS: ReportFilters = {
   branchCode: '',
 }
 
-type Tab = 'jobs' | 'hardware' | 'engineers' | 'productivity'
+type Tab = 'jobs' | 'hardware' | 'productivity'
 
 function currentMonthRange() {
   const today = new Date()
@@ -138,7 +136,7 @@ export default function ReportsPage() {
     setExportError('')
     setExportNote('')
     try {
-      const [projectRows, jobExport, materialRows, engineerRows, employeeRows] = await Promise.all([
+      const [projectRows, jobExport, materialRows, employeeRows] = await Promise.all([
         fetchProjectDashboard(),
         fetchJobReportForExport(jobFilters),
         fetchMaterialReport({
@@ -147,7 +145,6 @@ export default function ReportsPage() {
           projectId: jobFilters.projectId,
           stateName: jobFilters.stateName,
         }, false),
-        fetchEngineerStats(jobFilters.dateFrom, jobFilters.dateTo),
         fetchEmployeeProductivity(jobFilters.dateFrom, jobFilters.dateTo),
       ])
       const XLSX = await import('xlsx')
@@ -177,15 +174,6 @@ export default function ReportsPage() {
       appendReportSheet(XLSX, workbook, 'Material Issues', title, subtitle,
         ['Job #', 'Date', 'Branch', 'Item', 'Problem', 'Quantity', 'Status'],
         materialRows.map((row) => [row.job_no, row.job_date, row.branch_code, row.item, row.problem, row.quantity, row.status]))
-      appendReportSheet(XLSX, workbook, 'Engineer Productivity', title, subtitle,
-        ['Engineer', 'Total jobs', 'Completed / Live', 'Completion rate', 'Handover still pending'],
-        engineerRows.map((row) => [
-          row.engineer_name,
-          row.total_jobs,
-          row.completed_jobs,
-          `${row.total_jobs ? Math.round((row.completed_jobs / row.total_jobs) * 100) : 0}%`,
-          row.pending_handover,
-        ]))
       appendReportSheet(XLSX, workbook, 'Employee Productivity', title, subtitle,
         ['Full Name', 'Role', 'Account Status', 'Jobs Created', 'Jobs Completed / Live', 'Active Time', 'Login Days'],
         employeeRows.map((row) => [
@@ -228,17 +216,13 @@ export default function ReportsPage() {
         <button className={tab === 'hardware' ? 'tab active' : 'tab'} onClick={() => setTab('hardware')}>
           Hardware / material issues
         </button>
-        <button className={tab === 'engineers' ? 'tab active' : 'tab'} onClick={() => setTab('engineers')}>
-          Engineer productivity
-        </button>
         <button className={tab === 'productivity' ? 'tab active' : 'tab'} onClick={() => setTab('productivity')}>
-          Productivity
+          Employee Productivity
         </button>
       </div>
 
       {tab === 'jobs' && <JobReportTab filters={jobFilters} onFiltersChange={setJobFilters} />}
       {tab === 'hardware' && <HardwareReportTab />}
-      {tab === 'engineers' && <EngineerReportTab />}
       {tab === 'productivity' && <EmployeeProductivityTab />}
     </section>
   )
@@ -428,60 +412,6 @@ function HardwareReportTab() {
               <tr key={i}>
                 <td>#{r.job_no}</td><td>{r.job_date}</td><td>{r.branch_code}</td>
                 <td>{r.item}</td><td>{r.problem}</td><td className="numeric">{r.quantity}</td><td><StatusBadge status={r.status} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
-  )
-}
-
-function EngineerReportTab() {
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const stats = useEngineerStats(dateFrom, dateTo)
-  const rows = stats.data ?? []
-
-  const withRate = useMemo(
-    () => rows.map((r) => ({ ...r, rate: r.total_jobs ? Math.round((r.completed_jobs / r.total_jobs) * 100) : 0 })),
-    [rows],
-  )
-
-  return (
-    <>
-      <div className="filters">
-        <label className="date-field">From<input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} /></label>
-        <label className="date-field">To<input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} /></label>
-      </div>
-
-      <div className="head-row">
-        <span className="muted small">{rows.length} engineer{rows.length === 1 ? '' : 's'} with jobs in this range</span>
-        <button
-          className="secondary"
-          disabled={withRate.length === 0}
-          onClick={() => downloadCsv(`zygal-engineers-${new Date().toISOString().slice(0, 10)}.csv`, withRate)}
-        >
-          Export to CSV
-        </button>
-      </div>
-      {stats.isError && <div className="banner error">Could not load the report. Please refresh and try again.</div>}
-
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr><th>Engineer</th><th className="numeric">Total jobs</th><th className="numeric">Completed / Live</th><th className="numeric">Completion rate</th><th className="numeric">Handover still pending</th></tr>
-          </thead>
-          <tbody>
-            {stats.isLoading && <TableSkeleton columns={5} />}
-            {!stats.isLoading && withRate.length === 0 && <TableEmptyState columns={5} message="No jobs in this date range." />}
-            {withRate.map((r) => (
-              <tr key={r.engineer_id ?? 'unassigned'}>
-                <td><span className="person-cell"><Avatar name={r.engineer_name} />{r.engineer_name}</span></td>
-                <td className="numeric">{r.total_jobs}</td>
-                <td className="numeric">{r.completed_jobs}</td>
-                <td className="numeric">{r.rate}%</td>
-                <td className="numeric">{r.pending_handover}</td>
               </tr>
             ))}
           </tbody>
