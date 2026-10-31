@@ -72,25 +72,60 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="login-wrap">
-      <div className="login-layout">
-        <div className="login-card">
-          <div className="login-brand">
-            <LogoFull width={170} />
+    <main className="login-page">
+      <section className="login-visual" aria-label="Zygal operations platform">
+        <div className="login-visual-top">
+          <div className="login-visual-mark">
+            <LogoFull width={74} />
           </div>
-          <h1>Team Operations</h1>
-          <p
-            className="muted small"
-            style={{ textAlign: "center", marginTop: -8 }}
-          >
-            Sign in with your office email
+          <span>
+            ZYGAL<sup>®</sup>
+          </span>
+        </div>
+
+        <div className="login-visual-copy">
+          <span className="login-kicker">Internal operations platform</span>
+          <h2>
+            Connecting
+            <br />
+            <em>Structures.</em>
+          </h2>
+          <p>
+            One connected workspace for the teams, sites and support systems
+            that keep operations moving.
           </p>
+        </div>
+
+        <div className="login-brand-triad" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </div>
+        <span className="login-visual-footer">Deekshaa Infosystems pvt ltd</span>
+      </section>
+
+      <section className="login-form-panel" aria-label="Sign in">
+        <div className="login-card">
+          <header className="login-brand">
+            <div className="login-card-mark">
+              <LogoFull width={92} />
+            </div>
+            <div>
+              <span className="login-kicker">ZYGAL®</span>
+              <h1>{step === "email" ? "Welcome back" : "Check your email"}</h1>
+              <p>
+                {step === "email"
+                  ? "Team Operations & Support Management"
+                  : `Enter the verification code sent to ${cleanEmail}`}
+              </p>
+            </div>
+          </header>
 
           {notice && <div className="banner warn">{notice}</div>}
 
           {step === "email" ? (
             <form onSubmit={sendCode} noValidate>
-              <label htmlFor="email">Official email</label>
+              <label htmlFor="email">Authorized email</label>
               <input
                 id="email"
                 type="email"
@@ -98,21 +133,23 @@ export default function LoginPage() {
                 autoFocus
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@zygal.io"
+                placeholder="Enter your authorized email"
                 disabled={busy}
               />
+              <label className="login-remember">
+                <input type="checkbox" checked readOnly />
+                <span>Keep me signed in</span>
+              </label>
               {error && <div className="banner error">{error}</div>}
-              <button type="submit" disabled={busy}>
-                {busy ? "Sending..." : "Send code"}
+              <button type="submit" className="login-submit" disabled={busy}>
+                <span>{busy ? "Sending..." : "Continue"}</span>
+                <span aria-hidden="true">→</span>
               </button>
             </form>
           ) : (
             <form onSubmit={submitCode} noValidate>
-              <p className="muted small">
-                Code sent to <strong>{cleanEmail}</strong>
-              </p>
               {info && <div className="banner info">{info}</div>}
-              <label htmlFor="code">One-time code</label>
+              <label htmlFor="code">Verification code</label>
               <input
                 id="code"
                 inputMode="numeric"
@@ -121,14 +158,15 @@ export default function LoginPage() {
                 maxLength={8}
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-                placeholder="12345678"
+                placeholder="Enter the 6 to 8 digit code"
                 disabled={busy}
               />
               {error && <div className="banner error">{error}</div>}
-              <button type="submit" disabled={busy}>
-                {busy ? "Checking..." : "Verify and sign in"}
+              <button type="submit" className="login-submit" disabled={busy}>
+                <span>{busy ? "Checking..." : "Verify and sign in"}</span>
+                <span aria-hidden="true">→</span>
               </button>
-              <div className="row">
+              <div className="login-actions">
                 <button
                   type="button"
                   className="link"
@@ -148,16 +186,13 @@ export default function LoginPage() {
               </div>
             </form>
           )}
+
+          <p className="login-note">
+            Only emails authorized by an administrator can receive a
+            verification code.
+          </p>
         </div>
-        <aside className="login-side-panel">
-          <div className="login-side-content">
-            <div className="login-side-logo">
-              <LogoFull width={240} />
-            </div>
-            <p>Manage installations, support calls, and site data — all in one place.</p>
-          </div>
-        </aside>
-      </div>
+      </section>
     </main>
   );
 }
