@@ -20,10 +20,9 @@ const NAV: NavItem[] = [
     to: "/reports",
     label: "Reports",
     icon: "reports",
-    roles: ["team_lead", "admin"],
   },
   { to: "/logs", label: "Logs", icon: "logs", roles: ["team_lead", "admin"] },
-  { to: "/users", label: "Users", icon: "users", roles: ["admin"] },
+  { to: "/users", label: "Users", icon: "users" },
 ];
 
 const ROLE_LABEL: Record<Role, string> = {

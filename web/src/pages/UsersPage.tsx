@@ -96,6 +96,7 @@ function OnlineNow() {
 
 export default function UsersPage() {
   const { profile } = useAuth()
+  const isAdmin = profile?.role === 'admin'
   const qc = useQueryClient()
 
   const [page, setPage] = useState(0)
@@ -153,7 +154,7 @@ export default function UsersPage() {
       <section className="card">
         <div className="head-row">
           <h2>Users</h2>
-          <button onClick={() => setAdding(true)}><Icon name="plus" size={17} />Add employee</button>
+          {isAdmin && <button onClick={() => setAdding(true)}><Icon name="plus" size={17} />Add employee</button>}
         </div>
         <p className="muted small">
           New employees sign in with their office email and a one-time code sent by email. There is no
@@ -208,14 +209,18 @@ export default function UsersPage() {
                   <td>{u.job_title ?? '-'}</td>
                   <td><StatusBadge status={u.is_active ? 'Active' : 'Inactive'} /></td>
                   <td className="row-actions">
-                    <button className="link icon-action" aria-label={`Edit ${u.full_name}`} onClick={() => setEditing(u)}><Icon name="edit" size={16} />Edit</button>
-                    <button
-                      className="link"
-                      disabled={toggleActive.isPending || u.id === profile?.id}
-                      onClick={() => toggleActive.mutate({ user_id: u.id, is_active: !u.is_active })}
-                    >
-                      {u.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
+                    {isAdmin && (
+                      <>
+                        <button className="link icon-action" aria-label={`Edit ${u.full_name}`} onClick={() => setEditing(u)}><Icon name="edit" size={16} />Edit</button>
+                        <button
+                          className="link"
+                          disabled={toggleActive.isPending || u.id === profile?.id}
+                          onClick={() => toggleActive.mutate({ user_id: u.id, is_active: !u.is_active })}
+                        >
+                          {u.is_active ? 'Deactivate' : 'Activate'}
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
