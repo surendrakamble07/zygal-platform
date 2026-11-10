@@ -31,31 +31,74 @@ export interface ProjectDashboardRow {
   material_pending_sites: number
 }
 
-function monthStart(): string {
-  const d = new Date()
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
+export interface ProjectMonthBreakdownRow {
+  project_name: string
+  project_type_name: string
+  final_status: string
+  job_count: number
 }
 
-export function useDashboardStats() {
+interface ProjectMonthJob {
+  final_status: string
+  site:
+    | {
+        project: { name: string } | { name: string }[] | null
+        project_type: { name: string } | { name: string }[] | null
+      }
+    | {
+        project: { name: string } | { name: string }[] | null
+        project_type: { name: string } | { name: string }[] | null
+      }[]
+    | null
+}
+
+interface RecentJobRow {
+  id: string
+  job_no: number
+  job_date: string
+  final_status: string
+  handover_status: string
+  site: { branch_code: string } | { branch_code: string }[] | null
+}
+
+function localMonthStart(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}-01`
+}
+
+function nextMonthStart(monthStart: string): string {
+  const [year, month] = monthStart.split('-').map(Number)
+  const next = new Date(year, month, 1)
+  return localMonthStart(next)
+}
+
+export function currentMonthStart(): string {
+  const d = new Date()
+  return localMonthStart(d)
+}
+
+export function useDashboardStats(selectedMonthStart: string) {
   return useQuery({
-    queryKey: ['dashboard-stats'],
+    queryKey: ['dashboard-stats', selectedMonthStart],
     queryFn: async (): Promise<DashboardStats> => {
-      const from = monthStart()
+      const currentFrom = currentMonthStart()
+      const selectedTo = nextMonthStart(selectedMonthStart)
 
       const [sitesTotal, sitesActive, jobsThisMonth, pendingHandover, pendingMaterial, completed, statusBreakdown, recent] =
         await Promise.all([
           supabase.from('sites').select('id', { count: 'exact', head: true }).is('deleted_at', null),
           supabase.from('sites').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('status', 'Active'),
-          supabase.from('jobs').select('id', { count: 'exact', head: true }).is('deleted_at', null).gte('job_date', from),
+          supabase.from('jobs').select('id', { count: 'exact', head: true }).is('deleted_at', null).gte('job_date', currentFrom),
           supabase.from('jobs').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('handover_status', 'Pending'),
           supabase.from('material_issues').select('id', { count: 'exact', head: true }).eq('status', 'Pending'),
           supabase
             .from('jobs')
             .select('id', { count: 'exact', head: true })
             .is('deleted_at', null)
-            .gte('job_date', from)
+            .gte('job_date', currentFrom)
             .in('final_status', ['Completed', 'Live']),
-          supabase.from('jobs').select('final_status').is('deleted_at', null).gte('job_date', from).limit(5000),
+          supabase.from('jobs').select('final_status').is('deleted_at', null).gte('job_date', selectedMonthStart).lt('job_date', selectedTo).limit(5000),
           supabase
             .from('jobs')
             .select('id, job_no, job_date, final_status, handover_status, site:sites ( branch_code )')
@@ -64,6 +107,8 @@ export function useDashboardStats() {
             .order('job_no', { ascending: false })
             .limit(8),
         ])
+
+      if (statusBreakdown.error) throw statusBreakdown.error
 
       const byFinalStatusMap = new Map<string, number>()
       for (const r of statusBreakdown.data ?? []) {
@@ -81,13 +126,13 @@ export function useDashboardStats() {
         byFinalStatus: [...byFinalStatusMap.entries()]
           .map(([name, count]) => ({ name, count }))
           .sort((a, b) => b.count - a.count),
-        recentJobs: (recent.data ?? []).map((r: any) => ({
+        recentJobs: ((recent.data ?? []) as RecentJobRow[]).map((r) => ({
           id: r.id,
           job_no: r.job_no,
           job_date: r.job_date,
           final_status: r.final_status,
           handover_status: r.handover_status,
-          branch_code: r.site?.branch_code ?? '-',
+          branch_code: (Array.isArray(r.site) ? r.site[0]?.branch_code : r.site?.branch_code) ?? '-',
         })),
       }
     },
@@ -110,4 +155,50 @@ export async function fetchProjectDashboard(): Promise<ProjectDashboardRow[]> {
 
   if (error) throw error
   return (data ?? []) as ProjectDashboardRow[]
+}
+
+export function useProjectMonthBreakdown(monthStart: string) {
+  return useQuery({
+    queryKey: ['project-month-breakdown', monthStart],
+    queryFn: async (): Promise<ProjectMonthBreakdownRow[]> => {
+      const { data, error } = await supabase
+        .from('jobs')
+        .select(`
+          final_status,
+          site:sites!inner (
+            project:projects!sites_project_id_fkey ( name ),
+            project_type:project_types!sites_type_matches_project ( name )
+          )
+        `)
+        .is('deleted_at', null)
+        .gte('job_date', monthStart)
+        .lt('job_date', nextMonthStart(monthStart))
+      if (error) throw error
+
+      const totals = new Map<string, ProjectMonthBreakdownRow>()
+      for (const row of (data ?? []) as ProjectMonthJob[]) {
+        const site = Array.isArray(row.site) ? row.site[0] : row.site
+        const project = Array.isArray(site?.project) ? site.project[0] : site?.project
+        const projectType = Array.isArray(site?.project_type)
+          ? site.project_type[0]
+          : site?.project_type
+        if (!project?.name || !projectType?.name) continue
+
+        const key = `${project.name}\u0000${projectType.name}\u0000${row.final_status}`
+        const existing = totals.get(key)
+        if (existing) {
+          existing.job_count += 1
+        } else {
+          totals.set(key, {
+            project_name: project.name,
+            project_type_name: projectType.name,
+            final_status: row.final_status,
+            job_count: 1,
+          })
+        }
+      }
+      return [...totals.values()]
+    },
+    staleTime: 60_000,
+  })
 }

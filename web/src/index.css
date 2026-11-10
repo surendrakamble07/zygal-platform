@@ -1751,6 +1751,43 @@ textarea {
 .project-dashboard-card {
   gap: 12px;
 }
+.dashboard-month-picker label {
+  max-width: 260px;
+}
+.project-month-total {
+  padding-inline: 8px;
+  font-size: 0.9rem;
+}
+.project-month-type {
+  padding-inline: 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.project-month-statuses {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+.project-month-status {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--hover);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.project-month-status-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.project-month-status strong {
+  color: var(--text);
+}
 .project-dashboard-title {
   margin: 0;
   color: var(--text);

@@ -1,10 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth, type Role } from "../auth/auth-context";
 import {
+  currentMonthStart,
   useDashboardStats,
-  useProjectDashboard,
-  type ProjectDashboardRow,
+  useProjectMonthBreakdown,
 } from "../lib/dashboard-queries";
 import Icon, { type IconName } from "../components/Icon";
 import StatusBadge from "../components/StatusBadge";
@@ -55,161 +55,91 @@ function KpiCard({
   );
 }
 
-interface ProjectDashboard {
-  project_id: string;
+interface ProjectMonthDashboard {
   project_name: string;
-  total_sites: number;
-  live_sites: number;
-  pending_sites: number;
-  handover_pending_sites: number;
-  material_pending_sites: number;
-  types: ProjectDashboardRow[];
+  project_type_name: string;
+  job_count: number;
+  statuses: { name: string; count: number }[];
 }
 
-function ProjectMetric({
-  label,
-  value,
-  projectId,
-}: {
-  label: string;
-  value: number;
-  projectId: string;
-}) {
-  return (
-    <Link
-      className="project-metric project-metric-link"
-      to={`/reports?projectId=${encodeURIComponent(projectId)}`}
-    >
-      <span className="project-metric-value">{value}</span>
-      <span className="project-metric-label">{label}</span>
-    </Link>
-  );
-}
-
-function ProjectDashboardSection() {
-  const projectDashboard = useProjectDashboard();
+function ProjectMonthDashboardSection({ monthStart }: { monthStart: string }) {
+  const projectDashboard = useProjectMonthBreakdown(monthStart);
   const projects = useMemo(() => {
-    const grouped = new Map<string, ProjectDashboard>();
+    const grouped = new Map<string, ProjectMonthDashboard>();
 
     for (const row of projectDashboard.data ?? []) {
-      if (row.total_sites < 1) continue;
-
-      let project = grouped.get(row.project_id);
+      const projectKey = `${row.project_name}\u0000${row.project_type_name}`;
+      let project = grouped.get(projectKey);
       if (!project) {
         project = {
-          project_id: row.project_id,
           project_name: row.project_name,
-          total_sites: 0,
-          live_sites: 0,
-          pending_sites: 0,
-          handover_pending_sites: 0,
-          material_pending_sites: 0,
-          types: [],
+          project_type_name: row.project_type_name,
+          job_count: 0,
+          statuses: [],
         };
-        grouped.set(row.project_id, project);
+        grouped.set(projectKey, project);
       }
 
-      project.total_sites += row.total_sites;
-      project.live_sites += row.live_sites;
-      project.pending_sites += row.pending_sites;
-      project.handover_pending_sites += row.handover_pending_sites;
-      project.material_pending_sites += row.material_pending_sites;
-      project.types.push(row);
+      project.job_count += row.job_count;
+      project.statuses.push({ name: row.final_status, count: row.job_count });
     }
 
-    return [...grouped.values()]
-      .sort(
-        (a, b) =>
-          b.total_sites - a.total_sites ||
-          a.project_name.localeCompare(b.project_name),
-      )
-      .map((project) => ({
-        ...project,
-        types: project.types.sort((a, b) =>
-          a.project_type_name.localeCompare(b.project_type_name),
-        ),
-      }));
+    return [...grouped.values()].sort(
+      (a, b) =>
+        b.job_count - a.job_count ||
+        a.project_name.localeCompare(b.project_name),
+    );
   }, [projectDashboard.data]);
 
   return (
     <section className="card project-dashboard">
-      <h2>By project</h2>
+      <h2>By project · jobs logged</h2>
       {projectDashboard.isError && (
         <div className="banner error">
-          Could not load project dashboard data. Please refresh.
+          Could not load project job breakdown. Please refresh.
         </div>
       )}
       {projectDashboard.isLoading && (
-        <p className="muted">Loading project dashboard...</p>
+        <p className="muted">Loading project job breakdown...</p>
       )}
-      {!projectDashboard.isLoading && !projectDashboard.isError && projects.length === 0 && (
-        <p className="muted">No projects with sites to display.</p>
-      )}
+      {!projectDashboard.isLoading &&
+        !projectDashboard.isError &&
+        projects.length === 0 && (
+          <p className="muted">No jobs logged in this month.</p>
+        )}
       {projects.length > 0 && (
         <div className="project-dashboard-grid">
           {projects.map((project) => (
-            <article className="kpi project-dashboard-card" key={project.project_id}>
-              <h3 className="project-dashboard-title">{project.project_name}</h3>
-              <div className="project-metrics">
-                <ProjectMetric
-                  label="Total sites"
-                  value={project.total_sites}
-                  projectId={project.project_id}
-                />
-                <ProjectMetric
-                  label="Live"
-                  value={project.live_sites}
-                  projectId={project.project_id}
-                />
-                <ProjectMetric
-                  label="Pending"
-                  value={project.pending_sites}
-                  projectId={project.project_id}
-                />
-              </div>
-              <div className="project-secondary-metrics">
-                <div className="project-secondary-metric">
-                  <span
-                    className={
-                      project.handover_pending_sites > 0
-                        ? "project-secondary-value project-secondary-alert"
-                        : "project-secondary-value"
-                    }
-                  >
-                    {project.handover_pending_sites}
-                  </span>
-                  <span>Handover pending</span>
-                </div>
-                <div className="project-secondary-metric">
-                  <span
-                    className={
-                      project.material_pending_sites > 0
-                        ? "project-secondary-value project-secondary-alert"
-                        : "project-secondary-value"
-                    }
-                  >
-                    {project.material_pending_sites}
-                  </span>
-                  <span>Material pending</span>
-                </div>
-              </div>
-              {project.types.length > 1 && (
-                <details className="project-type-breakdown">
-                  <summary>Break down by project type</summary>
-                  <div className="project-type-list">
-                    {project.types.map((type) => (
-                      <div className="project-type-row" key={type.project_type_id}>
-                        <span className="project-type-name">
-                          {type.project_type_name}
-                        </span>
-                        <span>Total {type.total_sites}</span>
-                        <span>Live {type.live_sites}</span>
-                        <span>Pending {type.pending_sites}</span>
-                      </div>
-                    ))}
+            <article
+              className="kpi project-dashboard-card"
+              key={`${project.project_name}-${project.project_type_name}`}
+            >
+              <h3 className="project-dashboard-title">
+                {project.project_name}
+              </h3>
+              <span className="project-month-type">
+                {project.project_type_name}
+              </span>
+              <strong className="project-month-total">
+                {project.job_count}{" "}
+                {project.job_count === 1 ? "job" : "jobs"} logged
+              </strong>
+              <div className="project-month-statuses">
+                {project.statuses.map((status) => (
+                  <div className="project-month-status" key={status.name}>
+                    <span
+                      className="project-month-status-swatch"
+                      style={{
+                        background:
+                          STATUS_COLORS[status.name] ?? "var(--zy-blue)",
+                      }}
+                      aria-hidden="true"
+                    />
+                    <span>{status.name}</span>
+                    <strong>{status.count}</strong>
                   </div>
-                </details>
-              )}
+                ))}
+              </div>
             </article>
           ))}
         </div>
@@ -220,20 +150,38 @@ function ProjectDashboardSection() {
 
 export default function HomePage() {
   const { profile } = useAuth();
-  const stats = useDashboardStats();
+  const [selectedMonth, setSelectedMonth] = useState(() =>
+    currentMonthStart().slice(0, 7),
+  );
+  const monthStart = `${selectedMonth}-01`;
+  const currentMonth = currentMonthStart().slice(0, 7);
+  const stats = useDashboardStats(monthStart);
 
   if (!profile) return null;
 
   const statusRows = stats.data?.byFinalStatus ?? [];
-  const totalStatusCount = statusRows.reduce((total, row) => total + row.count, 0);
+  const totalStatusCount = statusRows.reduce(
+    (total, row) => total + row.count,
+    0,
+  );
   const circumference = 2 * Math.PI * 48;
-  let chartOffset = 0;
-  const statusSegments = statusRows.map((row) => {
-    const length = totalStatusCount ? (row.count / totalStatusCount) * circumference : 0;
-    const segment = { ...row, length, offset: chartOffset };
-    chartOffset += length;
-    return segment;
+  const statusSegments = statusRows.map((row, index) => {
+    const length = totalStatusCount
+      ? (row.count / totalStatusCount) * circumference
+      : 0;
+    const offset = statusRows
+      .slice(0, index)
+      .reduce(
+        (total, previous) =>
+          total + (previous.count / totalStatusCount) * circumference,
+        0,
+      );
+    return { ...row, length, offset };
   });
+  const displayedMonth = new Date(`${monthStart}T00:00:00Z`).toLocaleString(
+    undefined,
+    { month: "long", year: "numeric", timeZone: "UTC" },
+  );
 
   return (
     <>
@@ -242,6 +190,22 @@ export default function HomePage() {
         <p className="muted">
           {ROLE_LABEL[profile.role]} · {profile.email}
         </p>
+      </section>
+
+      <section className="card dashboard-month-picker">
+        <label>
+          Dashboard month
+          <input
+            type="month"
+            value={selectedMonth}
+            max={currentMonth}
+            onChange={(event) => {
+              if (event.target.value && event.target.value <= currentMonth) {
+                setSelectedMonth(event.target.value);
+              }
+            }}
+          />
+        </label>
       </section>
 
       {stats.isError && (
@@ -283,11 +247,11 @@ export default function HomePage() {
 
       <div className="two-col">
         <section className="card">
-          <h3>This month by final status</h3>
+          <h3>{displayedMonth} by final status</h3>
           {stats.data && stats.data.byFinalStatus.length === 0 && (
             <div className="empty-state compact">
               <Icon name="empty" className="empty-state-icon" />
-              <span>No jobs logged yet this month.</span>
+              <span>No jobs logged in this month.</span>
             </div>
           )}
           <div className="status-donut-layout">
@@ -314,14 +278,18 @@ export default function HomePage() {
                   ))}
                 </g>
               </svg>
-              <span className="status-donut-total" aria-hidden="true">{totalStatusCount}</span>
+              <span className="status-donut-total" aria-hidden="true">
+                {totalStatusCount}
+              </span>
             </div>
             <ul className="status-donut-legend">
               {statusRows.map((row) => (
                 <li key={row.name}>
                   <span
                     className="status-donut-swatch"
-                    style={{ background: STATUS_COLORS[row.name] ?? "var(--zy-blue)" }}
+                    style={{
+                      background: STATUS_COLORS[row.name] ?? "var(--zy-blue)",
+                    }}
                     aria-hidden="true"
                   />
                   <span>{row.name}</span>
@@ -350,18 +318,18 @@ export default function HomePage() {
                 {!stats.isLoading && stats.data?.recentJobs.length === 0 && (
                   <TableEmptyState columns={5} message="No recent jobs yet." />
                 )}
-                {stats.data?.recentJobs.map((j) => (
-                  <tr key={j.job_no}>
+                {stats.data?.recentJobs.map((job) => (
+                  <tr key={job.job_no}>
                     <td>
-                      <Link to={`/jobs/${j.id}`}>#{j.job_no}</Link>
+                      <Link to={`/jobs/${job.id}`}>#{job.job_no}</Link>
                     </td>
-                    <td>{j.job_date}</td>
-                    <td>{j.branch_code}</td>
+                    <td>{job.job_date}</td>
+                    <td>{job.branch_code}</td>
                     <td>
-                      <StatusBadge status={j.handover_status} />
+                      <StatusBadge status={job.handover_status} />
                     </td>
                     <td>
-                      <StatusBadge status={j.final_status} />
+                      <StatusBadge status={job.final_status} />
                     </td>
                   </tr>
                 ))}
@@ -374,7 +342,7 @@ export default function HomePage() {
         </section>
       </div>
 
-      <ProjectDashboardSection />
+      <ProjectMonthDashboardSection monthStart={monthStart} />
     </>
   );
 }
