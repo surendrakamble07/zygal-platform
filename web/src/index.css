@@ -858,6 +858,45 @@ svg.topbar-action-icon {
   gap: 12px;
   flex-wrap: wrap;
 }
+.note-preview-list {
+  display: grid;
+  gap: 8px;
+}
+.note-preview {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--card);
+  color: var(--text);
+  text-align: left;
+  white-space: normal;
+  box-shadow: none;
+}
+.note-preview:hover,
+.note-preview.active {
+  background: var(--hover);
+  border-color: color-mix(in srgb, var(--zy-blue) 36%, var(--border));
+  transform: none;
+  box-shadow: none;
+}
+.note-preview-date {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.note-preview-content {
+  width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .actions {
   display: flex;
   gap: 8px;

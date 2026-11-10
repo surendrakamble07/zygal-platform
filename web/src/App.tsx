@@ -13,6 +13,7 @@ import JobDetail from './pages/JobDetail'
 import UsersPage from './pages/UsersPage'
 import ReportsPage from './pages/ReportsPage'
 import LogsPage from './pages/LogsPage'
+import NotesPage from './pages/NotesPage'
 
 function Protected({ children }: { children: ReactNode }) {
   const { status } = useAuth()
@@ -68,6 +69,7 @@ export default function App() {
             <Route path="devices" element={<DevicesPage />} />
             <Route path="jobs" element={<JobsPage />} />
             <Route path="jobs/:jobId" element={<JobDetail />} />
+            <Route path="notes" element={<NotesPage />} />
             <Route
               path="reports"
               element={
