@@ -4,7 +4,7 @@ import { useAuth, type Role } from "../auth/auth-context";
 import {
   currentMonthStart,
   useDashboardStats,
-  useProjectMonthBreakdown,
+  useProjectRangeBreakdown,
 } from "../lib/dashboard-queries";
 import Icon, { type IconName } from "../components/Icon";
 import StatusBadge from "../components/StatusBadge";
@@ -14,6 +14,7 @@ const ROLE_LABEL: Record<Role, string> = {
   support: "Support",
   team_lead: "Team Lead / Assistant Manager",
   admin: "Admin",
+  other: "Limited",
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -30,14 +31,16 @@ function KpiCard({
   value,
   tone,
   icon,
+  to,
 }: {
   label: string;
   value: number | string;
   tone?: "ok" | "warn" | "bad";
   icon: IconName;
+  to?: string;
 }) {
-  return (
-    <div className={`kpi kpi-${tone ?? "plain"}`}>
+  const content = (
+    <>
       <div className="kpi-heading">
         <span className="kpi-icon">
           <Icon name={icon} size={20} />
@@ -51,29 +54,64 @@ function KpiCard({
           value
         )}
       </div>
-    </div>
-  );
+    </>
+  )
+
+  if (!to) {
+    return <div className={`kpi kpi-${tone ?? "plain"}`}>{content}</div>
+  }
+
+  return (
+    <Link to={to} className={`kpi kpi-${tone ?? "plain"}`}>
+      {content}
+    </Link>
+  )
 }
 
-interface ProjectMonthDashboard {
+interface ProjectRangeDashboard {
   project_name: string;
   project_type_name: string;
   job_count: number;
   statuses: { name: string; count: number }[];
 }
 
-function ProjectMonthDashboardSection({ monthStart }: { monthStart: string }) {
-  const projectDashboard = useProjectMonthBreakdown(monthStart);
+function toDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function toDateFromInput(value: string): Date {
+  return new Date(`${value}T00:00:00`);
+}
+
+function nextDay(dateValue: string): string {
+  const date = toDateFromInput(dateValue);
+  date.setDate(date.getDate() + 1);
+  return toDateInputValue(date);
+}
+
+function formatRangeLabel(dateValue: string): string {
+  return new Date(`${dateValue}T00:00:00`).toLocaleString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function ProjectRangeDashboardSection({ range }: { range: { start: string; end: string } }) {
+  const projectDashboard = useProjectRangeBreakdown(range.start, range.end);
   const projects = useMemo(() => {
-    const grouped = new Map<string, ProjectMonthDashboard>();
+    const grouped = new Map<string, ProjectRangeDashboard>();
 
     for (const row of projectDashboard.data ?? []) {
-      const projectKey = `${row.project_name}\u0000${row.project_type_name}`;
+      const projectKey = `${row.project_name}\u0000${row.project_type_name ?? 'All'}`;
       let project = grouped.get(projectKey);
       if (!project) {
         project = {
           project_name: row.project_name,
-          project_type_name: row.project_type_name,
+          project_type_name: row.project_type_name ?? 'All',
           job_count: 0,
           statuses: [],
         };
@@ -105,7 +143,7 @@ function ProjectMonthDashboardSection({ monthStart }: { monthStart: string }) {
       {!projectDashboard.isLoading &&
         !projectDashboard.isError &&
         projects.length === 0 && (
-          <p className="muted">No jobs logged in this month.</p>
+          <p className="muted">No jobs logged in this range.</p>
         )}
       {projects.length > 0 && (
         <div className="project-dashboard-grid">
@@ -153,9 +191,38 @@ export default function HomePage() {
   const [selectedMonth, setSelectedMonth] = useState(() =>
     currentMonthStart().slice(0, 7),
   );
-  const monthStart = `${selectedMonth}-01`;
+  const [selectedDay, setSelectedDay] = useState<string>("");
+  const today = toDateInputValue(new Date());
   const currentMonth = currentMonthStart().slice(0, 7);
-  const stats = useDashboardStats(monthStart);
+  const selectedRange = useMemo(() => {
+    if (selectedDay) {
+      return { start: selectedDay, end: nextDay(selectedDay) };
+    }
+
+    const monthStart = `${selectedMonth}-01`;
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const nextMonthDate = new Date(year, month, 1);
+    return {
+      start: monthStart,
+      end: toDateInputValue(nextMonthDate),
+    };
+  }, [selectedDay, selectedMonth]);
+  const stats = useDashboardStats(selectedRange);
+
+  const monthLink = (mode: 'all' | 'completed' | 'handover' = 'all') => {
+    const params = new URLSearchParams();
+    if (mode === 'completed') params.set('finalStatus', 'Completed');
+    if (mode === 'handover') params.set('handover', 'Pending');
+    if (selectedMonth === currentMonth) {
+      const [year, month] = selectedMonth.split('-').map(Number)
+      const start = new Date(year, month - 1, 1)
+      const end = new Date(year, month, 0)
+      params.set('dateFrom', start.toISOString().slice(0, 10));
+      params.set('dateTo', end.toISOString().slice(0, 10));
+    }
+    const query = params.size > 0 ? `?${params.toString()}` : ''
+    return `/jobs${query}`
+  }
 
   if (!profile) return null;
 
@@ -178,10 +245,12 @@ export default function HomePage() {
       );
     return { ...row, length, offset };
   });
-  const displayedMonth = new Date(`${monthStart}T00:00:00Z`).toLocaleString(
-    undefined,
-    { month: "long", year: "numeric", timeZone: "UTC" },
-  );
+  const activeRangeLabel = selectedDay
+    ? formatRangeLabel(selectedDay)
+    : new Date(`${selectedRange.start}T00:00:00`).toLocaleString(undefined, {
+        month: "long",
+        year: "numeric",
+      });
 
   return (
     <>
@@ -193,20 +262,51 @@ export default function HomePage() {
       </section>
 
       <section className="card dashboard-month-picker">
-        <label>
-          Dashboard month
-          <input
-            type="month"
-            value={selectedMonth}
-            max={currentMonth}
-            onChange={(event) => {
-              if (event.target.value && event.target.value <= currentMonth) {
-                setSelectedMonth(event.target.value);
-              }
-            }}
-          />
-        </label>
+        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "end" }}>
+          <label>
+            Dashboard month
+            <input
+              type="month"
+              value={selectedMonth}
+              max={currentMonth}
+              onChange={(event) => {
+                if (event.target.value && event.target.value <= currentMonth) {
+                  setSelectedMonth(event.target.value);
+                }
+              }}
+            />
+          </label>
+
+          <label>
+            Or pick a specific day
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <input
+                type="date"
+                value={selectedDay}
+                max={today}
+                onChange={(event) => {
+                  if (event.target.value && event.target.value <= today) {
+                    setSelectedDay(event.target.value);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="secondary small"
+                onClick={() => setSelectedDay("")}
+                disabled={!selectedDay}
+                aria-label="Clear selected day"
+              >
+                ✕
+              </button>
+            </div>
+          </label>
+        </div>
       </section>
+
+      <p className="muted" style={{ margin: "0 0 1rem" }}>
+        Showing: {activeRangeLabel}
+      </p>
 
       {stats.isError && (
         <div className="banner error">
@@ -219,35 +319,40 @@ export default function HomePage() {
           label="Active sites"
           value={stats.data?.activeSites ?? "..."}
           icon="sites"
+          to="/sites?status=Active"
         />
         <KpiCard
           label="Jobs this month"
           value={stats.data?.totalJobsThisMonth ?? "..."}
           icon="jobs"
+          to={monthLink()}
         />
         <KpiCard
           label="Completed this month"
           value={stats.data?.completedThisMonth ?? "..."}
           tone="ok"
           icon="reports"
+          to={monthLink('completed')}
         />
         <KpiCard
           label="Handover pending"
           value={stats.data?.pendingHandover ?? "..."}
           tone="warn"
           icon="jobs"
+          to={monthLink('handover')}
         />
         <KpiCard
           label="Material pending"
           value={stats.data?.pendingMaterial ?? "..."}
           tone="bad"
           icon="devices"
+          to="/reports?tab=hardware&pending=1"
         />
       </div>
 
       <div className="two-col">
         <section className="card">
-          <h3>{displayedMonth} by final status</h3>
+          <h3>{activeRangeLabel} by final status</h3>
           {stats.data && stats.data.byFinalStatus.length === 0 && (
             <div className="empty-state compact">
               <Icon name="empty" className="empty-state-icon" />
@@ -342,7 +447,7 @@ export default function HomePage() {
         </section>
       </div>
 
-      <ProjectMonthDashboardSection monthStart={monthStart} />
+      <ProjectRangeDashboardSection range={selectedRange} />
     </>
   );
 }

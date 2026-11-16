@@ -12,7 +12,10 @@ export async function callProvision<T extends { ok?: boolean; error?: string }>(
   const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/provision-employee`
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
     body: JSON.stringify(body),
   })
 

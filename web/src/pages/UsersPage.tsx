@@ -17,6 +17,7 @@ const ROLE_LABEL: Record<Role, string> = {
   support: 'Support',
   team_lead: 'Team Lead',
   admin: 'Admin',
+  other: 'Limited',
 }
 
 interface OnlineRow {
@@ -173,6 +174,7 @@ export default function UsersPage() {
             <option value="support">Support</option>
             <option value="team_lead">Team Lead</option>
             <option value="admin">Admin</option>
+            <option value="other">Limited</option>
           </select>
           <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(0) }}>
             <option value="">Any status</option>

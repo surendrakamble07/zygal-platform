@@ -77,6 +77,7 @@ export interface ReportFilters {
   employeeId: string
   finalStatus: string
   branchCode: string
+  vendor: string
 }
 
 const CSV_ROW_LIMIT = 5000
@@ -91,7 +92,7 @@ export function useJobReport(filters: ReportFilters, page: number, pageSize: num
         .select(
           `job_no, job_date, call_type, handover_status, final_status, has_minor_issue,
            site:sites!inner ( branch_code, branch_name, state, project_id, project:projects!inner ( name ) ),
-           engineer:engineers ( full_name ),
+           engineer:engineers${filters.vendor ? '!inner' : ''} ( full_name, vendor ),
            taken_by:profiles!jobs_call_taken_by_fkey ( full_name )`,
           { count: 'exact' },
         )
@@ -104,6 +105,8 @@ export function useJobReport(filters: ReportFilters, page: number, pageSize: num
       if (filters.projectId) q = q.eq('site.project_id', filters.projectId)
       if (filters.stateName) q = q.eq('site.state', filters.stateName)
       if (filters.branchCode.trim()) q = q.ilike('site.branch_code', `*${filters.branchCode.trim()}*`)
+      if (filters.vendor === 'In-house') q = q.is('engineer.vendor', null)
+      else if (filters.vendor) q = q.ilike('engineer.vendor', filters.vendor)
 
       const from = page * pageSize
       const { data, count, error } = await q
@@ -134,7 +137,11 @@ export function useJobReport(filters: ReportFilters, page: number, pageSize: num
 export async function fetchJobReportForExport(filters: ReportFilters): Promise<{ rows: JobMasterCsvRow[]; truncated: boolean }> {
   let q = supabase
     .from('jobs')
-    .select(jobsSelect({ includeDevices: false, includeMaterials: false }))
+    .select(jobsSelect({
+      includeDevices: false,
+      includeMaterials: false,
+      includeEngineerInner: !!filters.vendor,
+    }))
     .is('deleted_at', null)
 
   if (filters.dateFrom) q = q.gte('job_date', filters.dateFrom)
@@ -144,6 +151,8 @@ export async function fetchJobReportForExport(filters: ReportFilters): Promise<{
   if (filters.projectId) q = q.eq('site.project_id', filters.projectId)
   if (filters.stateName) q = q.eq('site.state', filters.stateName)
   if (filters.branchCode.trim()) q = q.ilike('site.branch_code', `*${filters.branchCode.trim()}*`)
+  if (filters.vendor === 'In-house') q = q.is('engineer.vendor', null)
+  else if (filters.vendor) q = q.ilike('engineer.vendor', filters.vendor)
 
   const { data, error } = await q
     .order('job_date', { ascending: false })

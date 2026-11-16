@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import type { WorkBook } from 'xlsx'
 import { useAuth } from '../auth/auth-context'
 import { useProjects, useStates } from '../lib/queries'
-import { useEmployees, useFinalStatuses } from '../lib/job-queries'
+import { useEmployees, useFinalStatuses, useVendorTypes } from '../lib/job-queries'
 import { fetchProjectDashboard, type ProjectDashboardRow } from '../lib/dashboard-queries'
 import {
   fetchEmployeeProductivity,
@@ -30,6 +30,7 @@ const EMPTY_FILTERS: ReportFilters = {
   employeeId: '',
   finalStatus: '',
   branchCode: '',
+  vendor: '',
 }
 
 type Tab = 'jobs' | 'hardware' | 'productivity'
@@ -238,6 +239,7 @@ function JobReportTab({ filters, onFiltersChange }: JobReportTabProps) {
   const states = useStates()
   const employees = useEmployees()
   const finalStatuses = useFinalStatuses()
+  const vendorTypes = useVendorTypes()
 
   const [page, setPage] = useState(0)
   const [exporting, setExporting] = useState(false)
@@ -308,6 +310,13 @@ function JobReportTab({ filters, onFiltersChange }: JobReportTabProps) {
           <option value="">Any final status</option>
           {(finalStatuses.data ?? []).map((f) => (
             <option key={f.name} value={f.name}>{f.name}</option>
+          ))}
+        </select>
+        <select value={filters.vendor} onChange={(e) => setFilter('vendor', e.target.value)}>
+          <option value="">Any vendor</option>
+          <option value="In-house">In-house</option>
+          {(vendorTypes.data ?? []).map((vendor) => (
+            <option key={vendor.name} value={vendor.name}>{vendor.name}</option>
           ))}
         </select>
       </div>

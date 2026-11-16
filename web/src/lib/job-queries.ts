@@ -39,7 +39,7 @@ export interface JoinedJob {
     project_type: { name: string } | null
     devices?: JoinedJobDevice[] | null
   } | null
-  engineer: { full_name: string; phone: string | null } | null
+  engineer: { full_name: string; phone: string | null; vendor: string | null } | null
   taken_by: { full_name: string } | null
   material_issues?: { status: string }[] | null
 }
@@ -47,9 +47,13 @@ export interface JoinedJob {
 export interface JobsSelectOptions {
   includeDevices?: boolean
   includeMaterials?: boolean
+  includeEngineerInner?: boolean
 }
 
 export function jobsSelect(options: JobsSelectOptions = {}): string {
+  const engineer = options.includeEngineerInner
+    ? 'engineer:engineers!inner'
+    : 'engineer:engineers'
   const devices = options.includeDevices === false
     ? ''
     : ', devices ( sim_name, sim_number, link_ip, link_mac_id, vault_tam, cash_counter_tam, main_door_tam, ngl_main_door_tam, device_status, deleted_at, created_at )'
@@ -59,7 +63,7 @@ export function jobsSelect(options: JobsSelectOptions = {}): string {
     project:projects!sites_project_id_fkey ( name ),
     project_type:project_types!sites_type_matches_project ( name )
     ${devices}
-  ), engineer:engineers ( full_name, phone ), taken_by:profiles!jobs_call_taken_by_fkey ( full_name )
+  ), ${engineer} ( full_name, phone, vendor ), taken_by:profiles!jobs_call_taken_by_fkey ( full_name )
   ${materials}`
 }
 
@@ -86,6 +90,22 @@ export const useChecklistItems = () => useLookup("checklist_items");
 export const useChecklistResults = () => useLookup("checklist_results");
 export const useMaterialItems = () => useLookup("material_items");
 export const useMaterialProblems = () => useLookup("material_problems");
+
+export function useVendorTypes() {
+  return useQuery({
+    queryKey: ["lookup", "vendor_types"],
+    staleTime: LOOKUP_STALE_MS,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("vendor_types")
+        .select("name, sort_order")
+        .eq("is_active", true)
+        .order("sort_order");
+      if (error) throw error;
+      return (data ?? []) as LookupRow[];
+    },
+  });
+}
 
 export function useEngineers() {
   return useQuery({

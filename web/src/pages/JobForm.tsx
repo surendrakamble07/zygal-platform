@@ -10,6 +10,7 @@ import {
   useMaterialProblems,
   useSiteByCode,
   useSupportUsers,
+  useVendorTypes,
 } from "../lib/job-queries";
 import { useDevicesForSite } from "../lib/device-queries";
 import { useProjects, useProjectTypes, useStates } from "../lib/queries";
@@ -53,6 +54,7 @@ interface EngineerOption {
   id: string;
   full_name: string;
   phone: string | null;
+  vendor: string | null;
   is_active: boolean;
 }
 
@@ -133,6 +135,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
   const materialItems = useMaterialItems();
   const materialProblems = useMaterialProblems();
   const support = useSupportUsers();
+  const vendorTypes = useVendorTypes();
   const projects = useProjects();
   const projectTypes = useProjectTypes();
   const states = useStates();
@@ -142,7 +145,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("engineers")
-        .select("id, full_name, phone, is_active")
+        .select("id, full_name, phone, vendor, is_active")
         .order("full_name");
       if (error) throw error;
       return (data ?? []) as EngineerOption[];
@@ -157,6 +160,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
   );
   const [engineerNameDraft, setEngineerNameDraft] = useState<string | null>(null);
   const [engineerNumberDraft, setEngineerNumberDraft] = useState<string | null>(null);
+  const [engineerVendorSelection, setEngineerVendorSelection] = useState<string | null>(null);
   const [handoverStatus, setHandoverStatus] = useState(
     job?.handover_status ?? "Pending",
   );
@@ -234,6 +238,14 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
       : engineerNameDraft === null
         ? assignedEngineer?.phone ?? ""
         : "");
+  const engineerVendorDraft =
+    engineerVendorSelection ??
+    matchingEngineer?.vendor ??
+    (engineerNameDraft === null ? assignedEngineer?.vendor : null) ??
+    null;
+  const engineerVendor =
+    engineerVendorDraft ??
+    "";
   const activeDevices = (devices.data ?? []).filter(
     (device) => device.device_status === "Active",
   );
@@ -455,6 +467,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
 
       const cleanEngineerName = engineerName.trim();
       const cleanEngineerNumber = engineerNumber.trim();
+      const cleanEngineerVendor = engineerVendor.trim();
       if (!cleanEngineerName && cleanEngineerNumber) {
         throw new JobFormValidationError(
           "Enter the engineer's name when providing an engineer number.",
@@ -470,13 +483,23 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
         );
         if (existingEngineer) {
           savedEngineerId = existingEngineer.id;
+          const engineerUpdates: Record<string, string | null> = {};
           if (
             engineerNumberDraft !== null
             && existingEngineer.phone !== (cleanEngineerNumber || null)
           ) {
+            engineerUpdates.phone = cleanEngineerNumber || null;
+          }
+          if (
+            engineerVendorSelection !== null
+            && (existingEngineer.vendor ?? null) !== (cleanEngineerVendor || null)
+          ) {
+            engineerUpdates.vendor = cleanEngineerVendor || null;
+          }
+          if (Object.keys(engineerUpdates).length > 0) {
             const { error: engineerError } = await supabase
               .from("engineers")
-              .update({ phone: cleanEngineerNumber || null })
+              .update(engineerUpdates)
               .eq("id", existingEngineer.id);
             if (engineerError) throw engineerError;
           }
@@ -486,6 +509,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
             .insert({
               full_name: cleanEngineerName,
               phone: cleanEngineerNumber || null,
+              vendor: cleanEngineerVendor || null,
             })
             .select("id")
             .single();
@@ -876,7 +900,10 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                   <input
                     list="job-form-engineer-names"
                     value={engineerName}
-                    onChange={(e) => setEngineerNameDraft(e.target.value)}
+                    onChange={(e) => {
+                      setEngineerNameDraft(e.target.value);
+                      setEngineerVendorSelection(null);
+                    }}
                     placeholder="Type engineer name"
                   />
                   <datalist id="job-form-engineer-names">
@@ -892,6 +919,18 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                     onChange={(e) => setEngineerNumberDraft(e.target.value)}
                     placeholder="Type engineer number"
                   />
+                </label>
+                <label>
+                  <span className="field-caption">Vendor</span>
+                  <select
+                    value={engineerVendor}
+                    onChange={(e) => setEngineerVendorSelection(e.target.value)}
+                  >
+                    <option value="">In-house</option>
+                    {vendorTypes.data?.map((vendor) => (
+                      <option key={vendor.name} value={vendor.name}>{vendor.name}</option>
+                    ))}
+                  </select>
                 </label>
               </div>
             </fieldset>

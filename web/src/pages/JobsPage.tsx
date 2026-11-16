@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { jobsSelect, useCallTypes, useFinalStatuses, useHandoverStatuses, type JoinedJob } from '../lib/job-queries'
+import { jobsSelect, useCallTypes, useFinalStatuses, useHandoverStatuses, useVendorTypes, type JoinedJob } from '../lib/job-queries'
 import Icon from '../components/Icon'
 import Avatar from '../components/Avatar'
 import StatusBadge from '../components/StatusBadge'
@@ -35,6 +35,7 @@ interface JobTableRow {
   takenBy: string | null
   engineerName: string | null
   engineerNumber: string | null
+  vendor: string | null
   remark: string | null
   handoverStatus: string
   pendingMaterials: number
@@ -74,6 +75,7 @@ const COLUMNS: JobColumn[] = [
   { id: 'takenBy', label: 'Call Taken By', render: (j) => j.takenBy ? <span className="person-cell"><Avatar name={j.takenBy} />{j.takenBy}</span> : '-' },
   { id: 'engineerName', label: 'Engineer Name', defaultVisible: true, render: (j) => j.engineerName ? <span className="person-cell"><Avatar name={j.engineerName} />{j.engineerName}</span> : 'Not assigned' },
   { id: 'engineerNumber', label: 'Engineer Number', render: (j) => j.engineerNumber ?? '-' },
+  { id: 'vendor', label: 'Vendor', defaultVisible: true, render: (j) => j.vendor || 'In-house' },
   {
     id: 'remark',
     label: 'Site Remark',
@@ -134,6 +136,7 @@ function toJobTableRow(row: JoinedJob): JobTableRow {
     takenBy: row.taken_by?.full_name ?? null,
     engineerName: row.engineer?.full_name ?? null,
     engineerNumber: row.engineer?.phone ?? null,
+    vendor: row.engineer?.vendor ?? null,
     remark: row.remark,
     handoverStatus: row.handover_status,
     pendingMaterials,
@@ -147,6 +150,7 @@ export default function JobsPage() {
   const callTypes = useCallTypes()
   const handoverStatuses = useHandoverStatuses()
   const finalStatuses = useFinalStatuses()
+  const vendorTypes = useVendorTypes()
 
   const [page, setPage] = useState(0)
   const [searchInput, setSearchInput] = useState('')
@@ -154,6 +158,7 @@ export default function JobsPage() {
   const [callType, setCallType] = useState('')
   const [handover, setHandover] = useState('')
   const [finalStatus, setFinalStatus] = useState('')
+  const [vendorType, setVendorType] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [adding, setAdding] = useState(false)
@@ -170,7 +175,7 @@ export default function JobsPage() {
   }, [searchInput])
 
   const jobs = useQuery({
-    queryKey: ['jobs', { page, search, callType, handover, finalStatus, dateFrom, dateTo }],
+    queryKey: ['jobs', { page, search, callType, handover, finalStatus, vendorType, dateFrom, dateTo }],
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase
@@ -183,6 +188,8 @@ export default function JobsPage() {
       if (finalStatus) q = q.eq('final_status', finalStatus)
       if (dateFrom) q = q.gte('job_date', dateFrom)
       if (dateTo) q = q.lte('job_date', dateTo)
+      if (vendorType === 'In-house') q = q.is('engineer.vendor', null)
+      else if (vendorType) q = q.ilike('engineer.vendor', vendorType)
 
       const clean = search.replace(/[,()*%\\"]/g, ' ').trim()
       if (clean) {
@@ -280,6 +287,13 @@ export default function JobsPage() {
             <option value="">Any final status</option>
             {finalStatuses.data?.map((f) => (
               <option key={f.name} value={f.name}>{f.name}</option>
+            ))}
+          </select>
+          <select value={vendorType} onChange={(e) => { setVendorType(e.target.value); setPage(0) }}>
+            <option value="">Any vendor</option>
+            <option value="In-house">In-house</option>
+            {vendorTypes.data?.map((v) => (
+              <option key={v.name} value={v.name}>{v.name}</option>
             ))}
           </select>
           <label className="date-field">

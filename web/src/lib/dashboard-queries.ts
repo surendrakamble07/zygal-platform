@@ -31,25 +31,11 @@ export interface ProjectDashboardRow {
   material_pending_sites: number
 }
 
-export interface ProjectMonthBreakdownRow {
+export interface ProjectRangeBreakdownRow {
   project_name: string
-  project_type_name: string
+  project_type_name?: string
   final_status: string
   job_count: number
-}
-
-interface ProjectMonthJob {
-  final_status: string
-  site:
-    | {
-        project: { name: string } | { name: string }[] | null
-        project_type: { name: string } | { name: string }[] | null
-      }
-    | {
-        project: { name: string } | { name: string }[] | null
-        project_type: { name: string } | { name: string }[] | null
-      }[]
-    | null
 }
 
 interface RecentJobRow {
@@ -67,38 +53,41 @@ function localMonthStart(date: Date): string {
   return `${year}-${month}-01`
 }
 
-function nextMonthStart(monthStart: string): string {
-  const [year, month] = monthStart.split('-').map(Number)
-  const next = new Date(year, month, 1)
-  return localMonthStart(next)
-}
-
 export function currentMonthStart(): string {
   const d = new Date()
   return localMonthStart(d)
 }
 
-export function useDashboardStats(selectedMonthStart: string) {
+export function useDashboardStats(range: { start: string; end: string }) {
   return useQuery({
-    queryKey: ['dashboard-stats', selectedMonthStart],
+    queryKey: ['dashboard-stats', range.start, range.end],
     queryFn: async (): Promise<DashboardStats> => {
-      const currentFrom = currentMonthStart()
-      const selectedTo = nextMonthStart(selectedMonthStart)
-
       const [sitesTotal, sitesActive, jobsThisMonth, pendingHandover, pendingMaterial, completed, statusBreakdown, recent] =
         await Promise.all([
           supabase.from('sites').select('id', { count: 'exact', head: true }).is('deleted_at', null),
           supabase.from('sites').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('status', 'Active'),
-          supabase.from('jobs').select('id', { count: 'exact', head: true }).is('deleted_at', null).gte('job_date', currentFrom),
+          supabase
+            .from('jobs')
+            .select('id', { count: 'exact', head: true })
+            .is('deleted_at', null)
+            .gte('job_date', range.start)
+            .lt('job_date', range.end),
           supabase.from('jobs').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('handover_status', 'Pending'),
           supabase.from('material_issues').select('id', { count: 'exact', head: true }).eq('status', 'Pending'),
           supabase
             .from('jobs')
             .select('id', { count: 'exact', head: true })
             .is('deleted_at', null)
-            .gte('job_date', currentFrom)
+            .gte('job_date', range.start)
+            .lt('job_date', range.end)
             .in('final_status', ['Completed', 'Live']),
-          supabase.from('jobs').select('final_status').is('deleted_at', null).gte('job_date', selectedMonthStart).lt('job_date', selectedTo).limit(5000),
+          supabase
+            .from('jobs')
+            .select('final_status')
+            .is('deleted_at', null)
+            .gte('job_date', range.start)
+            .lt('job_date', range.end)
+            .limit(5000),
           supabase
             .from('jobs')
             .select('id, job_no, job_date, final_status, handover_status, site:sites ( branch_code )')
@@ -157,47 +146,22 @@ export async function fetchProjectDashboard(): Promise<ProjectDashboardRow[]> {
   return (data ?? []) as ProjectDashboardRow[]
 }
 
-export function useProjectMonthBreakdown(monthStart: string) {
+export function useProjectRangeBreakdown(startDate: string, endDate: string) {
   return useQuery({
-    queryKey: ['project-month-breakdown', monthStart],
-    queryFn: async (): Promise<ProjectMonthBreakdownRow[]> => {
-      const { data, error } = await supabase
-        .from('jobs')
-        .select(`
-          final_status,
-          site:sites!inner (
-            project:projects!sites_project_id_fkey ( name ),
-            project_type:project_types!sites_type_matches_project ( name )
-          )
-        `)
-        .is('deleted_at', null)
-        .gte('job_date', monthStart)
-        .lt('job_date', nextMonthStart(monthStart))
+    queryKey: ['project-range-breakdown', startDate, endDate],
+    queryFn: async (): Promise<ProjectRangeBreakdownRow[]> => {
+      const { data, error } = await supabase.rpc('project_range_breakdown', {
+        p_start: startDate,
+        p_end: endDate,
+      })
       if (error) throw error
 
-      const totals = new Map<string, ProjectMonthBreakdownRow>()
-      for (const row of (data ?? []) as ProjectMonthJob[]) {
-        const site = Array.isArray(row.site) ? row.site[0] : row.site
-        const project = Array.isArray(site?.project) ? site.project[0] : site?.project
-        const projectType = Array.isArray(site?.project_type)
-          ? site.project_type[0]
-          : site?.project_type
-        if (!project?.name || !projectType?.name) continue
-
-        const key = `${project.name}\u0000${projectType.name}\u0000${row.final_status}`
-        const existing = totals.get(key)
-        if (existing) {
-          existing.job_count += 1
-        } else {
-          totals.set(key, {
-            project_name: project.name,
-            project_type_name: projectType.name,
-            final_status: row.final_status,
-            job_count: 1,
-          })
-        }
-      }
-      return [...totals.values()]
+      return (data ?? []).map((row: { project_name: string; project_type_name?: string | null; final_status: string; job_count: number | string }) => ({
+        project_name: row.project_name,
+        project_type_name: row.project_type_name ?? 'All',
+        final_status: row.final_status,
+        job_count: Number(row.job_count),
+      }))
     },
     staleTime: 60_000,
   })

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import JSZip from "jszip";
 import { supabase } from "../lib/supabase";
 import StatusBadge from "../components/StatusBadge";
 import Pagination from "../components/Pagination";
@@ -50,6 +51,8 @@ export default function DevicesPage() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -111,13 +114,93 @@ export default function DevicesPage() {
     },
   });
 
-  const rows = devices.data?.rows ?? [];
+  const rows = useMemo(() => devices.data?.rows ?? [], [devices.data]);
   const total = devices.data?.total ?? 0;
+
+  const exportRows = useMemo(() => rows.map((row) => ({
+    branch_code: row.branch_code,
+    project_name: row.project_name,
+    sim_name: row.sim_name ?? "",
+    sim_number: row.sim_number ?? "",
+    link_ip: row.link_ip ?? "",
+    link_mac_id: row.link_mac_id ?? "",
+    device_status: row.device_status,
+    site_id: row.site_id,
+  })), [rows]);
+
+  async function exportSimZip() {
+    if (!rows.length) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const zip = new JSZip();
+      const csvHeader = [
+        "branch_code",
+        "project_name",
+        "sim_name",
+        "sim_number",
+        "link_ip",
+        "link_mac_id",
+        "device_status",
+        "site_id",
+      ];
+      const csvRows = exportRows.map((row) => csvHeader.map((key) => {
+        const value = row[key as keyof typeof row];
+        const text = value == null ? "" : String(value).replace(/"/g, '""');
+        return /[",\n]/.test(text) ? `"${text}"` : text;
+      }).join(","));
+      zip.file("sim-cards.csv", [csvHeader.join(","), ...csvRows].join("\r\n"));
+
+      let photoCount = 0;
+      const photoFetches = await Promise.allSettled(
+        rows.map(async (row) => {
+          if (!row.sim_photo_url || !row.sim_name) return null;
+          const response = await fetch(row.sim_photo_url);
+          if (!response.ok) throw new Error(`Failed to fetch ${row.sim_name}`);
+          const blob = await response.blob();
+          const safeName = (row.sim_name || row.id).replace(/[^a-zA-Z0-9_.-]/g, "_");
+          zip.file(`photos/${safeName}-${row.id}.${blob.type.includes("png") ? "png" : blob.type.includes("jpeg") ? "jpg" : "jpg"}`, blob);
+          photoCount += 1;
+          return row.id;
+        }),
+      );
+      const failures = photoFetches.filter((result) => result.status === "rejected").length;
+      if (failures > 0 && photoCount === 0) {
+        throw new Error("Could not fetch any SIM photos for export.");
+      }
+      if (failures > 0) {
+        console.warn(`${failures} photo(s) could not be downloaded; the ZIP was created with the remaining files.`);
+      }
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `zygal-sim-cards-${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The SIM ZIP export failed.";
+      setExportError(message);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <section className="card">
       <div className="head-row">
         <h2>SIM Cards</h2>
+        <button type="button" className="secondary" onClick={exportSimZip} disabled={exporting || rows.length === 0}>
+          {exporting ? "Preparing ZIP..." : "Export ZIP"}
+        </button>
       </div>
+
+      {exportError && (
+        <div className="banner error" role="alert">{exportError}</div>
+      )}
       <p className="muted small">
         To add a SIM card, open its site under Sites and use "Add SIM card" there.
       </p>

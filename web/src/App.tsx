@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthProvider'
 import { useAuth, type Role } from './auth/auth-context'
 import Layout from './components/Layout'
@@ -31,8 +31,16 @@ function Protected({ children }: { children: ReactNode }) {
 
 // Convenience only: the database rules enforce who can really do what.
 function RoleGate({ roles, children }: { roles: Role[]; children: ReactNode }) {
+  const location = useLocation()
   const { profile } = useAuth()
-  if (!profile || !roles.includes(profile.role)) return <Navigate to="/" replace />
+  if (!profile) return <Navigate to="/" replace />
+  if (profile.role === 'other') {
+    const pageKey = location.pathname.replace(/^\//, '').replace(/\/$/, '') || 'dashboard'
+    const allowed = profile.allowed_pages ?? []
+    if (!allowed.includes(pageKey)) return <Navigate to="/" replace />
+    return <>{children}</>
+  }
+  if (!roles.includes(profile.role)) return <Navigate to="/" replace />
   return <>{children}</>
 }
 

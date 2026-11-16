@@ -30,6 +30,7 @@ const ROLE_LABEL: Record<Role, string> = {
   support: "Support",
   team_lead: "Team Lead",
   admin: "Admin",
+  other: "Limited",
 };
 
 export default function Layout() {
@@ -41,7 +42,15 @@ export default function Layout() {
   if (!profile) return null;
 
   // Hiding a link is only a convenience. The database rules are the real protection.
-  const items = NAV.filter((n) => !n.roles || n.roles.includes(profile.role));
+  const items = NAV.filter((n) => {
+    if (!n.roles || n.roles.includes(profile.role)) return true;
+    if (profile.role === 'other') {
+      const pageKey = n.to.replace(/^\//, '').replace(/\/$/, '') || 'dashboard';
+      const allowed = profile.allowed_pages ?? [];
+      return allowed.includes(pageKey);
+    }
+    return false;
+  });
 
   function toggleTheme() {
     const nextTheme = theme === "dark" ? "light" : "dark";

@@ -1,4 +1,4 @@
-export type Role = 'support' | 'team_lead' | 'admin'
+export type Role = 'support' | 'team_lead' | 'admin' | 'other'
 
 export interface EmployeeRow {
   id: string
@@ -8,4 +8,5 @@ export interface EmployeeRow {
   job_title: string | null
   is_active: boolean
   created_at: string
+  allowed_pages?: string[] | null
 }

@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { Session } from '@supabase/supabase-js'
 
-export type Role = 'support' | 'team_lead' | 'admin'
+export type Role = 'support' | 'team_lead' | 'admin' | 'other'
 
 export interface Profile {
   id: string
@@ -10,6 +10,7 @@ export interface Profile {
   role: Role
   job_title: string | null
   is_active: boolean
+  allowed_pages?: string[] | null
 }
 
 export type AuthStatus = 'loading' | 'signed_out' | 'signed_in'
