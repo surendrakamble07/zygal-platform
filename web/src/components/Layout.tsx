@@ -1,8 +1,23 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth, type Role } from "../auth/auth-context";
 import { LogoMark } from "./Logo";
 import Icon, { type IconName } from "./Icon";
+import { supabase } from "../lib/supabase";
+
+type BreakType = "Lunch" | "Tea";
+
+interface BreakEvent {
+  id: string;
+  user_id: string;
+  break_type: BreakType;
+  started_at: string;
+  planned_minutes: number;
+  ended_at: string | null;
+}
+
+const ACTIVE_BREAK_QUERY = "active-break";
 
 interface NavItem {
   to: string;
@@ -17,13 +32,15 @@ const NAV: NavItem[] = [
   { to: "/devices", label: "SIM Cards", icon: "devices" },
   { to: "/jobs", label: "Jobs", icon: "jobs" },
   { to: "/notes", label: "My Notes", icon: "empty" },
+  { to: "/my-activity", label: "My Activity", icon: "reports" },
   {
     to: "/reports",
     label: "Reports",
     icon: "reports",
+    roles: ["team_lead", "admin"],
   },
   { to: "/logs", label: "Logs", icon: "logs", roles: ["team_lead", "admin"] },
-  { to: "/users", label: "Users", icon: "users" },
+  { to: "/users", label: "Users", icon: "users", roles: ["team_lead", "admin"] },
 ];
 
 const ROLE_LABEL: Record<Role, string> = {
@@ -35,10 +52,101 @@ const ROLE_LABEL: Record<Role, string> = {
 
 export default function Layout() {
   const { profile, signOut } = useAuth();
+  const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     document.documentElement.dataset.theme === "dark" ? "dark" : "light",
   );
+  const [breakToStart, setBreakToStart] = useState<BreakType | null>(null);
+  const [breakError, setBreakError] = useState("");
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  const activeBreakQuery = useQuery({
+    queryKey: [ACTIVE_BREAK_QUERY, profile?.id],
+    enabled: !!profile?.id,
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      if (!profile?.id) throw new Error("Your profile is unavailable.");
+      const { data, error } = await supabase
+        .from("break_events")
+        .select("id, user_id, break_type, started_at, planned_minutes, ended_at")
+        .eq("user_id", profile.id)
+        .is("ended_at", null)
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data as BreakEvent | null;
+    },
+  });
+  const activeBreak = activeBreakQuery.data ?? null;
+  const activeBreakId = activeBreak?.id;
+  const startBreak = useMutation({
+    mutationFn: async (breakType: BreakType) => {
+      if (!profile?.id) throw new Error("Your profile is unavailable.");
+      const { data: existingBreak, error: existingBreakError } = await supabase
+        .from("break_events")
+        .select("id")
+        .eq("user_id", profile.id)
+        .is("ended_at", null)
+        .limit(1)
+        .maybeSingle();
+      if (existingBreakError) throw existingBreakError;
+      if (existingBreak) throw new Error("You already have an active break.");
+
+      const { data, error } = await supabase
+        .from("break_events")
+        .insert({
+          user_id: profile.id,
+          break_type: breakType,
+          started_at: new Date().toISOString(),
+          planned_minutes: breakType === "Lunch" ? 40 : 10,
+        })
+        .select("id, user_id, break_type, started_at, planned_minutes, ended_at")
+        .single();
+      if (error) throw error;
+      return data as BreakEvent;
+    },
+    onSuccess: (event) => {
+      setBreakError("");
+      setBreakToStart(null);
+      queryClient.setQueryData([ACTIVE_BREAK_QUERY, profile?.id], event);
+      void queryClient.invalidateQueries({ queryKey: [ACTIVE_BREAK_QUERY, profile?.id] });
+    },
+    onError: (error) => {
+      setBreakError(error instanceof Error ? error.message : "Could not start the break.");
+      void queryClient.invalidateQueries({ queryKey: [ACTIVE_BREAK_QUERY, profile?.id] });
+    },
+  });
+  const endBreak = useMutation({
+    mutationFn: async (event: BreakEvent) => {
+      if (!profile?.id) throw new Error("Your profile is unavailable.");
+      const { data, error } = await supabase
+        .from("break_events")
+        .update({ ended_at: new Date().toISOString() })
+        .eq("id", event.id)
+        .eq("user_id", profile.id)
+        .is("ended_at", null)
+        .select("id, user_id, break_type, started_at, planned_minutes, ended_at")
+        .single();
+      if (error) throw error;
+      return data as BreakEvent;
+    },
+    onSuccess: () => {
+      setBreakError("");
+      queryClient.setQueryData([ACTIVE_BREAK_QUERY, profile?.id], null);
+      void queryClient.invalidateQueries({ queryKey: [ACTIVE_BREAK_QUERY, profile?.id] });
+    },
+    onError: (error) => {
+      setBreakError(error instanceof Error ? error.message : "Could not end the break.");
+    },
+  });
+
+  useEffect(() => {
+    if (!activeBreakId) return;
+    const timer = window.setInterval(() => setClockNow(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, [activeBreakId]);
+
   if (!profile) return null;
 
   // Hiding a link is only a convenience. The database rules are the real protection.
@@ -51,6 +159,13 @@ export default function Layout() {
     }
     return false;
   });
+  const breakMinutesLeft = activeBreak
+    ? Math.ceil(
+        (new Date(activeBreak.started_at).getTime()
+          + activeBreak.planned_minutes * 60_000
+          - clockNow) / 60_000,
+      )
+    : null;
 
   function toggleTheme() {
     const nextTheme = theme === "dark" ? "light" : "dark";
@@ -125,6 +240,51 @@ export default function Layout() {
             </svg>
             {theme === "dark" ? "Light mode" : "Dark mode"}
           </button>
+          {activeBreak ? (
+            <>
+              <span
+                className={`break-indicator${breakMinutesLeft !== null && breakMinutesLeft <= 0 ? " overdue" : ""}`}
+                role="status"
+              >
+                {activeBreak.break_type}: {breakMinutesLeft !== null && breakMinutesLeft <= 0
+                  ? "overdue"
+                  : `${breakMinutesLeft}m left`}
+              </span>
+              <button
+                type="button"
+                className="secondary topbar-action"
+                disabled={endBreak.isPending}
+                onClick={() => endBreak.mutate(activeBreak)}
+              >
+                {endBreak.isPending ? "Ending..." : "End break"}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="secondary topbar-action"
+                disabled={activeBreakQuery.isLoading || activeBreakQuery.isError || startBreak.isPending}
+                onClick={() => {
+                  setBreakError("");
+                  setBreakToStart("Lunch");
+                }}
+              >
+                Lunch Break
+              </button>
+              <button
+                type="button"
+                className="secondary topbar-action"
+                disabled={activeBreakQuery.isLoading || activeBreakQuery.isError || startBreak.isPending}
+                onClick={() => {
+                  setBreakError("");
+                  setBreakToStart("Tea");
+                }}
+              >
+                Tea Break
+              </button>
+            </>
+          )}
           <button
             className="secondary topbar-action logout-action"
             disabled={busy}
@@ -144,6 +304,47 @@ export default function Layout() {
           </button>
         </div>
       </header>
+
+      {breakError && !breakToStart && (
+        <div className="break-error" role="alert">{breakError}</div>
+      )}
+      {activeBreakQuery.isError && (
+        <div className="break-error" role="alert">Could not load your break status.</div>
+      )}
+      {breakToStart && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => event.target === event.currentTarget && setBreakToStart(null)}
+        >
+          <section className="modal break-confirmation" role="dialog" aria-modal="true" aria-labelledby="break-confirmation-title">
+            <h2 id="break-confirmation-title">Start a {breakToStart.toLowerCase()} break?</h2>
+            <p>
+              Start your {breakToStart === "Lunch" ? "40-minute lunch" : "10-minute tea"} break?
+            </p>
+            {breakError && <div className="banner error" role="alert">{breakError}</div>}
+            <div className="actions">
+              <button
+                type="button"
+                className="secondary"
+                disabled={startBreak.isPending}
+                onClick={() => {
+                  setBreakToStart(null);
+                  setBreakError("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={startBreak.isPending}
+                onClick={() => startBreak.mutate(breakToStart)}
+              >
+                {startBreak.isPending ? "Starting..." : "Confirm"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       <div className="body">
         <nav className="sidebar" aria-label="Main">

@@ -25,7 +25,7 @@ function useJob(jobId: string | undefined) {
       const { data, error } = await supabase
         .from("jobs")
         .select(
-          "id, job_no, job_date, call_type, site_id, call_taken_by, engineer_id, handover_status, final_status, has_minor_issue, remark, completed_at",
+          "id, job_no, job_date, call_type, site_id, call_taken_by, engineer_id, handover_status, final_status, remark, completed_at",
         )
         .eq("id", jobId)
         .single();
@@ -126,7 +126,7 @@ export default function JobDetail() {
   const updateStatus = useMutation({
     mutationFn: async (
       patch: Partial<
-        Pick<Job, "handover_status" | "final_status" | "has_minor_issue">
+        Pick<Job, "handover_status" | "final_status">
       >,
     ) => {
       const { error } = await supabase
@@ -310,9 +310,17 @@ export default function JobDetail() {
             <select
               value={j.handover_status}
               disabled={updateStatus.isPending}
-              onChange={(e) =>
-                updateStatus.mutate({ handover_status: e.target.value })
-              }
+              onChange={(e) => {
+                const nextStatus = e.target.value;
+                updateStatus.mutate(
+                  nextStatus === "Completed"
+                    ? { handover_status: nextStatus, final_status: "Live" }
+                    : {
+                        handover_status: nextStatus,
+                        ...(j.final_status === "Live" ? { final_status: "WIP" } : {}),
+                      },
+                );
+              }}
             >
               {handoverStatuses.data?.map((h) => (
                 <option key={h.name} value={h.name}>
@@ -323,36 +331,27 @@ export default function JobDetail() {
           </label>
           <label>
             <span>
-              Final status <StatusBadge status={j.final_status} />
+              Final status <StatusBadge status={j.handover_status === "Completed" ? "Live" : j.final_status} />
             </span>
-            <select
-              value={j.final_status}
-              disabled={updateStatus.isPending}
-              onChange={(e) =>
-                updateStatus.mutate({ final_status: e.target.value })
-              }
-            >
-              {finalStatuses.data?.map((f) => (
-                <option key={f.name} value={f.name}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Minor issue
-            <select
-              value={j.has_minor_issue ? "Yes" : "No"}
-              disabled={updateStatus.isPending}
-              onChange={(e) =>
-                updateStatus.mutate({
-                  has_minor_issue: e.target.value === "Yes",
-                })
-              }
-            >
-              <option value="No">No</option>
-              <option value="Yes">Yes</option>
-            </select>
+            {j.handover_status === "Completed" ? (
+              <span>Live</span>
+            ) : (
+              <select
+                value={j.final_status}
+                disabled={updateStatus.isPending}
+                onChange={(e) =>
+                  updateStatus.mutate({ final_status: e.target.value })
+                }
+              >
+                {finalStatuses.data
+                  ?.filter((f) => ["Completed", "WIP", "Minor Issue"].includes(f.name))
+                  .map((f) => (
+                    <option key={f.name} value={f.name}>
+                      {f.name}
+                    </option>
+                  ))}
+              </select>
+            )}
           </label>
         </div>
         {statusError && <div className="banner error">{statusError}</div>}

@@ -73,12 +73,12 @@ interface MaterialDraft {
   item: string;
   problem: string;
   quantity: string;
-  status: "Pending" | "Resolved";
 }
 
 class JobFormValidationError extends Error {}
 
 const NEW_DEVICE = "__new_device__";
+const PENDING_FINAL_STATUSES = new Set(["Completed", "WIP", "Minor Issue"]);
 const SIM_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 const SIM_PHOTO_TYPES: Record<string, string> = {
   jpg: "image/jpeg",
@@ -161,13 +161,19 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
   const [engineerNameDraft, setEngineerNameDraft] = useState<string | null>(null);
   const [engineerNumberDraft, setEngineerNumberDraft] = useState<string | null>(null);
   const [engineerVendorSelection, setEngineerVendorSelection] = useState<string | null>(null);
-  const [handoverStatus, setHandoverStatus] = useState(
-    job?.handover_status ?? "Pending",
+  const [engineerNameError, setEngineerNameError] = useState("");
+  const [engineerNumberError, setEngineerNumberError] = useState("");
+  const [remarkError, setRemarkError] = useState("");
+  const initialHandoverStatus = job?.handover_status ?? "Pending";
+  const [handoverStatus, setHandoverStatus] = useState(initialHandoverStatus);
+  const [finalStatus, setFinalStatus] = useState(
+    initialHandoverStatus === "Completed"
+      ? "Live"
+      : job?.final_status && PENDING_FINAL_STATUSES.has(job.final_status)
+        ? job.final_status
+        : "WIP",
   );
-  const [finalStatus, setFinalStatus] = useState(job?.final_status ?? "WIP");
-  const [hasMinorIssue, setHasMinorIssue] = useState(
-    job?.has_minor_issue ?? false,
-  );
+  const [hasMaterialIssue, setHasMaterialIssue] = useState(false);
   const [remark, setRemark] = useState(job?.remark ?? "");
   const [siteDraft, setSiteDraft] = useState<SiteDraft | null>(null);
   const [deviceDraft, setDeviceDraft] = useState<DeviceDraft | null>(null);
@@ -423,17 +429,20 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
 
       const pendingMaterialCount = materialDrafts.filter(
         (material) =>
-          material.item && material.problem && material.status === "Pending",
+          material.item && material.problem,
       ).length;
-      const closesJob = finalStatus === "Completed" || finalStatus === "Live";
-      if (closesJob && handoverStatus === "Pending") {
+      if (finalStatus === "Live" && pendingMaterialCount > 0) {
         throw new JobFormValidationError(
-          "A job cannot be Completed or Live while Handover is Pending.",
+          "A job cannot be Live while a material issue is Pending.",
         );
       }
-      if (closesJob && pendingMaterialCount > 0) {
+      if (
+        finalStatus === "WIP"
+        && hasMaterialIssue
+        && !materialDrafts.some((material) => material.item && material.problem)
+      ) {
         throw new JobFormValidationError(
-          "A job cannot be Completed or Live while a material issue is Pending.",
+          "Enter an item, problem, and quantity for at least one material issue.",
         );
       }
 
@@ -531,8 +540,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
             engineer_id: savedEngineerId,
             handover_status: handoverStatus,
             final_status: finalStatus,
-            has_minor_issue: hasMinorIssue,
-            remark: remark.trim() || null,
+            remark: remark.trim(),
           })
           .select("id")
           .single();
@@ -550,8 +558,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
             engineer_id: savedEngineerId,
             handover_status: handoverStatus,
             final_status: finalStatus,
-            has_minor_issue: hasMinorIssue,
-            remark: remark.trim() || null,
+            remark: remark.trim(),
           })
           .eq("id", savedJobId);
         if (updateError) throw updateError;
@@ -670,7 +677,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
           item: material.item,
           problem: material.problem,
           quantity: Number(material.quantity),
-          status: material.status,
+          status: "Pending",
         }));
       if (issuesToInsert.length > 0) {
         const { error: materialError } = await supabase
@@ -708,6 +715,14 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
     setError("");
     setSimPhotoError("");
 
+    const hasEngineerName = !!engineerName.trim();
+    const hasEngineerNumber = !!engineerNumber.trim();
+    const hasRemark = !!remark.trim();
+    setEngineerNameError(hasEngineerName ? "" : "Engineer name is required.");
+    setEngineerNumberError(hasEngineerNumber ? "" : "Engineer number is required.");
+    setRemarkError(hasRemark ? "" : "Site Remark is required.");
+    if (!hasEngineerName || !hasEngineerNumber || !hasRemark) return;
+
     if (!jobDate) return setError("Pick the job date.");
     if (!callType) return setError("Choose a call type.");
     if (!branchCode.trim()) return setError("Enter the Branch Code.");
@@ -733,6 +748,15 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
       return setError("Choose a project type for this site.");
     if (!callTakenBy) return setError("Choose who took the call.");
     if (!finalStatus) return setError("Choose a final status.");
+    if (
+      finalStatus === "WIP"
+      && hasMaterialIssue
+      && !materialDrafts.some((material) => material.item && material.problem)
+    ) {
+      return setError(
+        "Enter an item, problem, and quantity for at least one material issue.",
+      );
+    }
     if (simPhotoFile && !selectedDeviceId)
       return setSimPhotoError("Choose a device record before uploading a SIM photo.");
     if (simPhotoFile && simPhotoFile.size > SIM_PHOTO_MAX_BYTES)
@@ -792,13 +816,6 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
     projects.isError ||
     projectTypes.isError ||
     states.isError;
-  const isRuleCheckOk =
-    (finalStatus === "Completed" || finalStatus === "Live") &&
-    handoverStatus !== "Pending" &&
-    !materialDrafts.some(
-      (material) => material.item && material.status === "Pending",
-    );
-
   return (
     <div
       className="modal-backdrop"
@@ -895,7 +912,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                 </label>
                 <label>
                   <span className="field-caption">
-                    Engineer <span className="field-optional">Optional</span>
+                    Engineer Name <span className="field-required">*</span>
                   </span>
                   <input
                     list="job-form-engineer-names"
@@ -903,9 +920,13 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                     onChange={(e) => {
                       setEngineerNameDraft(e.target.value);
                       setEngineerVendorSelection(null);
+                      if (e.target.value.trim()) setEngineerNameError("");
                     }}
                     placeholder="Type engineer name"
+                    aria-required="true"
+                    aria-invalid={!!engineerNameError}
                   />
+                  {engineerNameError && <span className="hint bad" role="alert">{engineerNameError}</span>}
                   <datalist id="job-form-engineer-names">
                     {engineers.data?.filter((engineer) => engineer.is_active).map((engineer) => (
                       <option key={engineer.id} value={engineer.full_name} />
@@ -913,12 +934,21 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                   </datalist>
                 </label>
                 <label>
-                  <span className="field-caption">Engineer number</span>
+                  <span className="field-caption">
+                    Engineer number <span className="field-required">*</span>
+                  </span>
                   <input
+                    type="tel"
                     value={engineerNumber}
-                    onChange={(e) => setEngineerNumberDraft(e.target.value)}
+                    onChange={(e) => {
+                      setEngineerNumberDraft(e.target.value);
+                      if (e.target.value.trim()) setEngineerNumberError("");
+                    }}
                     placeholder="Type engineer number"
+                    aria-required="true"
+                    aria-invalid={!!engineerNumberError}
                   />
+                  {engineerNumberError && <span className="hint bad" role="alert">{engineerNumberError}</span>}
                 </label>
                 <label>
                   <span className="field-caption">Vendor</span>
@@ -1206,7 +1236,17 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                   </span>
                   <select
                     value={handoverStatus}
-                    onChange={(e) => setHandoverStatus(e.target.value)}
+                    onChange={(e) => {
+                      const nextStatus = e.target.value;
+                      setHandoverStatus(nextStatus);
+                      if (nextStatus === "Completed") {
+                        setFinalStatus("Live");
+                        setHasMaterialIssue(false);
+                        setMaterialDrafts([]);
+                      } else if (finalStatus === "Live") {
+                        setFinalStatus("WIP");
+                      }
+                    }}
                   >
                     {handoverStatuses.data?.map((status) => (
                       <option key={status.name} value={status.name}>
@@ -1215,46 +1255,62 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                     ))}
                   </select>
                 </label>
-                <label>
-                  <span className="field-caption">
-                    Final status <span className="field-required">*</span>
-                  </span>
-                  <select
-                    value={finalStatus}
-                    onChange={(e) => setFinalStatus(e.target.value)}
-                  >
-                    {finalStatuses.data?.map((status) => (
-                      <option key={status.name} value={status.name}>
-                        {status.name}
-                      </option>
-                    ))}
+                {handoverStatus === "Completed" ? (
+                  <div>
+                    <span className="field-caption">Final status</span>
+                    <div>Live</div>
+                  </div>
+                ) : (
+                  <label>
+                    <span className="field-caption">
+                      Final status <span className="field-required">*</span>
+                    </span>
+                    <select
+                      value={finalStatus}
+                      onChange={(e) => {
+                        setFinalStatus(e.target.value);
+                        if (e.target.value !== "WIP") {
+                          setHasMaterialIssue(false);
+                          setMaterialDrafts([]);
+                        }
+                      }}
+                    >
+                      {finalStatuses.data
+                        ?.filter((status) => PENDING_FINAL_STATUSES.has(status.name))
+                        .map((status) => (
+                          <option key={status.name} value={status.name}>
+                            {status.name}
+                          </option>
+                        ))}
                   </select>
                 </label>
+                )}
+              </div>
+
+              {finalStatus === "WIP" && (
                 <label>
-                  <span className="field-caption">
-                    Minor issue <span className="field-required">*</span>
-                  </span>
+                  Any material issue?
                   <select
-                    value={hasMinorIssue ? "Yes" : "No"}
-                    onChange={(e) => setHasMinorIssue(e.target.value === "Yes")}
+                    value={hasMaterialIssue ? "Yes" : "No"}
+                    onChange={(e) => {
+                      const hasIssue = e.target.value === "Yes";
+                      setHasMaterialIssue(hasIssue);
+                      setMaterialDrafts(
+                        hasIssue ? [{ item: "", problem: "", quantity: "1" }] : [],
+                      );
+                    }}
                   >
                     <option value="No">No</option>
                     <option value="Yes">Yes</option>
                   </select>
                 </label>
-                <div className="rule-preview">
-                  <span className="field-caption">Rule Check</span>
-                  <span>{isRuleCheckOk ? "OK" : "-"}</span>
-                </div>
-              </div>
+              )}
 
+              {finalStatus === "WIP" && hasMaterialIssue && (
               <div className="material-entry-list">
                 <div className="head-row">
                   <div>
                     <strong>Material issues</strong>
-                    <p className="muted small">
-                      Optional; the jobs table summarizes pending issues.
-                    </p>
                   </div>
                   <button
                     type="button"
@@ -1266,7 +1322,6 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                           item: "",
                           problem: "",
                           quantity: "1",
-                          status: "Pending",
                         },
                       ])
                     }
@@ -1320,20 +1375,6 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                         }
                       />
                     </label>
-                    <label>
-                      Status
-                      <select
-                        value={material.status}
-                        onChange={(e) =>
-                          updateMaterial(index, {
-                            status: e.target.value as MaterialDraft["status"],
-                          })
-                        }
-                      >
-                        <option value="Pending">Pending</option>
-                        <option value="Resolved">Resolved</option>
-                      </select>
-                    </label>
                     <button
                       type="button"
                       className="link"
@@ -1349,17 +1390,24 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                   </div>
                 ))}
               </div>
+              )}
             </fieldset>
 
             <label className="full">
               <span className="field-caption">
-                Site Remark <span className="field-optional">Optional</span>
+                Site Remark <span className="field-required">*</span>
               </span>
               <textarea
                 rows={3}
                 value={remark}
-                onChange={(e) => setRemark(e.target.value)}
+                onChange={(e) => {
+                  setRemark(e.target.value);
+                  if (e.target.value.trim()) setRemarkError("");
+                }}
+                aria-required="true"
+                aria-invalid={!!remarkError}
               />
+              {remarkError && <span className="hint bad" role="alert">{remarkError}</span>}
             </label>
 
             {error && (

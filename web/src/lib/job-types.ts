@@ -32,7 +32,6 @@ export interface Job {
   engineer_id: string | null
   handover_status: string
   final_status: string
-  has_minor_issue: boolean
   remark: string | null
   completed_at: string | null
 }

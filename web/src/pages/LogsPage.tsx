@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase'
 const PAGE_SIZE = 50
 const ROW_LIMIT = 200
 
-type FeedType = 'login' | 'data' | 'job-status'
+type FeedType = 'login' | 'data' | 'job-status' | 'break'
 type FilterType = 'all' | FeedType
 type JsonRecord = Record<string, unknown>
 
@@ -33,6 +33,17 @@ interface SessionEndRow {
   user_id: string
   ended_at: string
   end_reason: 'logout' | 'timeout' | null
+}
+
+interface BreakStartRow {
+  id: string
+  user_id: string
+  break_type: 'Lunch' | 'Tea'
+  started_at: string
+}
+
+interface BreakEndRow extends BreakStartRow {
+  ended_at: string
 }
 
 interface JobStatusRow {
@@ -117,7 +128,14 @@ function relativeTime(value: string): string {
 }
 
 async function loadActivities(dateFrom: string, dateTo: string): Promise<ActivityData> {
-  const [auditResult, sessionStartResult, sessionEndResult, statusResult] = await Promise.all([
+  const [
+    auditResult,
+    sessionStartResult,
+    sessionEndResult,
+    statusResult,
+    breakStartResult,
+    breakEndResult,
+  ] = await Promise.all([
     (() => {
       let query = supabase
         .from('audit_log')
@@ -159,22 +177,49 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
       if (dateTo) query = query.lt('changed_at', nextDayStart(dateTo))
       return query
     })(),
+    (() => {
+      let query = supabase
+        .from('break_events')
+        .select('id, user_id, break_type, started_at')
+        .order('started_at', { ascending: false })
+        .limit(ROW_LIMIT)
+      if (dateFrom) query = query.gte('started_at', dayStart(dateFrom))
+      if (dateTo) query = query.lt('started_at', nextDayStart(dateTo))
+      return query
+    })(),
+    (() => {
+      let query = supabase
+        .from('break_events')
+        .select('id, user_id, break_type, started_at, ended_at')
+        .not('ended_at', 'is', null)
+        .order('ended_at', { ascending: false })
+        .limit(ROW_LIMIT)
+      if (dateFrom) query = query.gte('ended_at', dayStart(dateFrom))
+      if (dateTo) query = query.lt('ended_at', nextDayStart(dateTo))
+      return query
+    })(),
   ])
 
   if (auditResult.error) throw auditResult.error
   if (sessionStartResult.error) throw sessionStartResult.error
   if (sessionEndResult.error) throw sessionEndResult.error
   if (statusResult.error) throw statusResult.error
+  if (breakStartResult.error) throw breakStartResult.error
+  if (breakEndResult.error) throw breakEndResult.error
 
   const auditRows = auditResult.data as AuditRow[]
   const sessionStartRows = sessionStartResult.data as SessionStartRow[]
   const sessionEndRows = sessionEndResult.data as SessionEndRow[]
   const statusRows = statusResult.data as JobStatusRow[]
+  const breakStartRows = breakStartResult.data as BreakStartRow[]
+  const breakEndRows = breakEndResult.data as BreakEndRow[]
   const profileIds = [...new Set([
     ...auditRows.map((row) => row.changed_by),
     ...sessionStartRows.map((row) => row.user_id),
     ...sessionEndRows.map((row) => row.user_id),
     ...statusRows.map((row) => row.changed_by),
+    ...breakStartRows.map((row) => row.user_id),
+    ...breakEndRows.map((row) => row.user_id),
   ].filter((id): id is string => id !== null))]
   const jobIds = [...new Set(statusRows.map((row) => row.job_id))]
 
@@ -256,6 +301,32 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
         timestamp: row.changed_at,
       }
     }),
+    ...breakStartRows.map((row): Activity => {
+      const person = people.get(row.user_id) ?? 'Unknown'
+      return {
+        id: `break-start-${row.id}`,
+        type: 'break',
+        person,
+        message: `${person} started a ${row.break_type} break`,
+        badge: `${row.break_type} break started`,
+        timestamp: row.started_at,
+      }
+    }),
+    ...breakEndRows.map((row): Activity => {
+      const person = people.get(row.user_id) ?? 'Unknown'
+      const durationMinutes = Math.max(
+        0,
+        Math.round((new Date(row.ended_at).getTime() - new Date(row.started_at).getTime()) / 60_000),
+      )
+      return {
+        id: `break-end-${row.id}`,
+        type: 'break',
+        person,
+        message: `${person} ended their ${row.break_type} break (${durationMinutes} min)`,
+        badge: `${row.break_type} break ended`,
+        timestamp: row.ended_at,
+      }
+    }),
   ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
   let loginActivityCount = 0
   const activities = mergedActivities.filter((activity) => {
@@ -270,7 +341,9 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
       || sessionStartRows.length === ROW_LIMIT
       || sessionEndRows.length === ROW_LIMIT
       || sessionStartRows.length + sessionEndRows.length > ROW_LIMIT
-      || statusRows.length === ROW_LIMIT,
+      || statusRows.length === ROW_LIMIT
+      || breakStartRows.length === ROW_LIMIT
+      || breakEndRows.length === ROW_LIMIT,
   }
 }
 
@@ -324,6 +397,7 @@ export default function LogsPage() {
           <option value="login">Logins</option>
           <option value="data">Data changes</option>
           <option value="job-status">Job status changes</option>
+          <option value="break">Breaks</option>
         </select>
         <input
           type="search"

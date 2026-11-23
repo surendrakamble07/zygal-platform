@@ -5,8 +5,7 @@ export function friendlyJobError(err: unknown): string {
   const msg = e?.message ?? "";
 
   // Our own trigger messages (raised with specific SQLSTATE codes) come through as-is.
-  if (e?.code === "23514" && msg) return msg;
-  if (e?.code === "42501" && msg) return msg;
+  if ((e?.code === "23514" || e?.code === "42501" || e?.code === "P0001") && msg) return msg;
 
   if (e?.code === "23505")
     return "This already exists. Check for a duplicate entry.";

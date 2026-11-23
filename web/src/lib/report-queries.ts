@@ -25,7 +25,6 @@ export interface JobMasterCsvRow {
   'Handover Status': string
   'Material Issue': string
   'Final Status': string
-  'Rule Validator Status': string
 }
 
 export const JOB_REPORT_EXPORT_HEADERS: (keyof JobMasterCsvRow)[] = [
@@ -51,7 +50,6 @@ export const JOB_REPORT_EXPORT_HEADERS: (keyof JobMasterCsvRow)[] = [
   'Handover Status',
   'Material Issue',
   'Final Status',
-  'Rule Validator Status',
 ]
 
 export interface JobReportRow {
@@ -60,7 +58,6 @@ export interface JobReportRow {
   call_type: string
   handover_status: string
   final_status: string
-  has_minor_issue: boolean
   branch_code: string
   branch_name: string | null
   project_name: string
@@ -90,7 +87,7 @@ export function useJobReport(filters: ReportFilters, page: number, pageSize: num
       let q = supabase
         .from('jobs')
         .select(
-          `job_no, job_date, call_type, handover_status, final_status, has_minor_issue,
+          `job_no, job_date, call_type, handover_status, final_status,
            site:sites!inner ( branch_code, branch_name, state, project_id, project:projects!inner ( name ) ),
            engineer:engineers${filters.vendor ? '!inner' : ''} ( full_name, vendor ),
            taken_by:profiles!jobs_call_taken_by_fkey ( full_name )`,
@@ -120,7 +117,6 @@ export function useJobReport(filters: ReportFilters, page: number, pageSize: num
         call_type: r.call_type,
         handover_status: r.handover_status,
         final_status: r.final_status,
-        has_minor_issue: r.has_minor_issue,
         branch_code: r.site?.branch_code ?? '-',
         branch_name: r.site?.branch_name ?? null,
         project_name: r.site?.project?.name ?? '-',
@@ -200,7 +196,6 @@ export async function fetchJobReportForExport(filters: ReportFilters): Promise<{
   const rows: JobMasterCsvRow[] = jobs.map((job) => {
     const site = job.site
     const device = site ? devicesBySite.get(site.id) : undefined
-    const finalStatus = job.final_status
     return {
       Date: job.job_date,
       'Call Type': job.call_type,
@@ -223,8 +218,7 @@ export async function fetchJobReportForExport(filters: ReportFilters): Promise<{
       'Site Remark': job.remark ?? '',
       'Handover Status': job.handover_status,
       'Material Issue': (materialsByJob.get(job.id) ?? []).join('; '),
-      'Final Status': finalStatus,
-      'Rule Validator Status': finalStatus === 'Completed' || finalStatus === 'Live' ? 'OK' : '',
+      'Final Status': job.final_status,
     }
   })
   return { rows, truncated }
@@ -352,7 +346,22 @@ export function useEmployeeProductivity(dateFrom: string, dateTo: string) {
   })
 }
 
-export async function fetchEmployeeProductivity(dateFrom: string, dateTo: string): Promise<EmployeeProductivityRow[]> {
+export function useMyProductivity(profileId: string | null, dateFrom: string, dateTo: string) {
+  return useQuery({
+    queryKey: ['report-my-productivity', profileId, dateFrom, dateTo],
+    enabled: profileId !== null,
+    queryFn: () => {
+      if (!profileId) throw new Error('A signed-in profile is required to load personal activity.')
+      return fetchEmployeeProductivity(dateFrom, dateTo, profileId)
+    },
+  })
+}
+
+export async function fetchEmployeeProductivity(
+  dateFrom: string,
+  dateTo: string,
+  profileId?: string,
+): Promise<EmployeeProductivityRow[]> {
       let sessionsQuery = supabase
         .from('user_sessions')
         .select('user_id, started_at, ended_at')
@@ -360,6 +369,7 @@ export async function fetchEmployeeProductivity(dateFrom: string, dateTo: string
         .limit(20000)
       if (dateFrom) sessionsQuery = sessionsQuery.gte('started_at', dateBoundary(dateFrom))
       if (dateTo) sessionsQuery = sessionsQuery.lt('started_at', dateBoundary(dateTo, true))
+      if (profileId) sessionsQuery = sessionsQuery.eq('user_id', profileId)
 
       let jobsQuery = supabase
         .from('jobs')
@@ -368,16 +378,23 @@ export async function fetchEmployeeProductivity(dateFrom: string, dateTo: string
         .limit(20000)
       if (dateFrom) jobsQuery = jobsQuery.gte('job_date', dateFrom)
       if (dateTo) jobsQuery = jobsQuery.lte('job_date', dateTo)
+      if (profileId) jobsQuery = jobsQuery.eq('call_taken_by', profileId)
+
+      let profilesQuery = supabase.from('profiles').select('id, full_name, role, is_active').order('full_name')
+      if (profileId) profilesQuery = profilesQuery.eq('id', profileId)
+
+      let historyQuery = supabase
+        .from('job_status_history')
+        .select('job_id, field_name, new_value, changed_by, changed_at')
+        .eq('field_name', 'final_status')
+        .order('changed_at', { ascending: false })
+        .limit(20000)
+      if (profileId) historyQuery = historyQuery.eq('changed_by', profileId)
 
       const [profilesResult, jobsResult, historyResult, sessionsResult] = await Promise.all([
-        supabase.from('profiles').select('id, full_name, role, is_active').order('full_name'),
+        profilesQuery,
         jobsQuery,
-        supabase
-          .from('job_status_history')
-          .select('job_id, field_name, new_value, changed_by, changed_at')
-          .eq('field_name', 'final_status')
-          .order('changed_at', { ascending: false })
-          .limit(20000),
+        historyQuery,
         sessionsQuery,
       ])
       if (profilesResult.error) throw profilesResult.error

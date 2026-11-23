@@ -40,8 +40,6 @@ interface JobTableRow {
   handoverStatus: string
   pendingMaterials: number
   finalStatus: string
-  ruleCheck: boolean
-  hasMinorIssue: boolean
 }
 
 interface JobColumn {
@@ -88,8 +86,6 @@ const COLUMNS: JobColumn[] = [
     render: (j) => j.pendingMaterials > 0 ? <StatusBadge status={`${j.pendingMaterials} pending`} /> : '-',
   },
   { id: 'finalStatus', label: 'Final Status', defaultVisible: true, render: (j) => <StatusBadge status={j.finalStatus} /> },
-  { id: 'ruleCheck', label: 'Rule Check', render: (j) => j.ruleCheck ? <StatusBadge status="OK" /> : '-' },
-  { id: 'minorIssue', label: 'Minor', defaultVisible: true, render: (j) => j.hasMinorIssue ? 'Yes' : '-' },
 ]
 
 const DEFAULT_VISIBLE_COLUMNS = COLUMNS.filter((column) => column.defaultVisible).map((column) => column.id)
@@ -112,8 +108,6 @@ function toJobTableRow(row: JoinedJob): JobTableRow {
   )
   const device = activeDevices.length === 1 ? activeDevices[0] : null
   const pendingMaterials = (row.material_issues ?? []).filter((issue) => issue.status === 'Pending').length
-  const finalStatus = row.final_status
-
   return {
     id: row.id,
     job_no: row.job_no,
@@ -140,9 +134,7 @@ function toJobTableRow(row: JoinedJob): JobTableRow {
     remark: row.remark,
     handoverStatus: row.handover_status,
     pendingMaterials,
-    finalStatus,
-    ruleCheck: finalStatus === 'Completed' || finalStatus === 'Live',
-    hasMinorIssue: row.has_minor_issue,
+    finalStatus: row.final_status,
   }
 }
 

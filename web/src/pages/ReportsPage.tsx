@@ -335,12 +335,12 @@ function JobReportTab({ filters, onFiltersChange }: JobReportTabProps) {
           <thead>
             <tr>
               <th>Job #</th><th>Date</th><th>Call type</th><th>Branch</th><th>Project</th>
-              <th>State</th><th>Engineer</th><th>Handover</th><th>Final status</th><th>Minor</th>
+              <th>State</th><th>Engineer</th><th>Handover</th><th>Final status</th>
             </tr>
           </thead>
           <tbody>
-            {report.isLoading && <TableSkeleton columns={10} />}
-            {!report.isLoading && rows.length === 0 && <TableEmptyState columns={10} message="No jobs match these filters." />}
+            {report.isLoading && <TableSkeleton columns={9} />}
+            {!report.isLoading && rows.length === 0 && <TableEmptyState columns={9} message="No jobs match these filters." />}
             {rows.map((r) => (
               <tr key={r.job_no}>
                 <td>#{r.job_no}</td>
@@ -354,7 +354,6 @@ function JobReportTab({ filters, onFiltersChange }: JobReportTabProps) {
                   : 'Not assigned'}</td>
                 <td><StatusBadge status={r.handover_status} /></td>
                 <td><StatusBadge status={r.final_status} /></td>
-                <td>{r.has_minor_issue ? 'Yes' : ''}</td>
               </tr>
             ))}
           </tbody>

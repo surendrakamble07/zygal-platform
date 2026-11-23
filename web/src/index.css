@@ -648,8 +648,45 @@ a.link:hover {
 }
 .topbar-right {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+.break-indicator {
+  padding: 8px 11px;
+  border: 1px solid color-mix(in srgb, var(--zy-green) 28%, var(--border));
+  border-radius: 999px;
+  background: var(--success-bg);
+  color: var(--success-text);
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.break-indicator.overdue {
+  border-color: color-mix(in srgb, var(--zy-orange) 48%, var(--border));
+  background: var(--warn-bg);
+  color: var(--warning-text);
+}
+.break-error {
+  position: fixed;
+  top: 76px;
+  right: 16px;
+  z-index: 30;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--err) 25%, var(--border));
+  border-radius: 10px;
+  background: var(--err-bg);
+  color: var(--err);
+  font-size: 0.85rem;
+}
+.break-confirmation {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.break-confirmation p {
+  color: var(--muted);
 }
 .who {
   font-size: 0.9rem;
@@ -1588,13 +1625,13 @@ textarea {
     padding: 12px 14px;
   }
   .topbar-right {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    display: flex;
+    flex-wrap: wrap;
     width: 100%;
     gap: 8px;
   }
   .who {
-    grid-column: 1 / -1;
+    flex-basis: 100%;
     min-width: 0;
     white-space: normal;
   }

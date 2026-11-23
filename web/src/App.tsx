@@ -14,6 +14,7 @@ import UsersPage from './pages/UsersPage'
 import ReportsPage from './pages/ReportsPage'
 import LogsPage from './pages/LogsPage'
 import NotesPage from './pages/NotesPage'
+import MyActivityPage from './pages/MyActivityPage'
 
 function Protected({ children }: { children: ReactNode }) {
   const { status } = useAuth()
@@ -78,10 +79,11 @@ export default function App() {
             <Route path="jobs" element={<JobsPage />} />
             <Route path="jobs/:jobId" element={<JobDetail />} />
             <Route path="notes" element={<NotesPage />} />
+            <Route path="my-activity" element={<MyActivityPage />} />
             <Route
               path="reports"
               element={
-                <RoleGate roles={['support', 'team_lead', 'admin']}>
+                <RoleGate roles={['team_lead', 'admin']}>
                   <ReportsPage />
                 </RoleGate>
               }
@@ -97,7 +99,7 @@ export default function App() {
             <Route
               path="users"
               element={
-                <RoleGate roles={['support', 'team_lead', 'admin']}>
+                <RoleGate roles={['team_lead', 'admin']}>
                   <UsersPage />
                 </RoleGate>
               }
