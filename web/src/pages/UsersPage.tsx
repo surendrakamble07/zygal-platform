@@ -123,7 +123,7 @@ export default function UsersPage() {
     queryFn: async () => {
       let q = supabase
         .from('profiles')
-        .select('id, full_name, email, role, job_title, is_active, created_at', { count: 'exact' })
+        .select('id, full_name, email, phone, role, job_title, is_active, created_at', { count: 'exact' })
 
       const clean = search.replace(/[,()*%\\"]/g, ' ').trim()
       if (clean) q = q.or(`full_name.ilike.*${clean}*,email.ilike.*${clean}*`)
@@ -134,6 +134,18 @@ export default function UsersPage() {
       const { data, count, error } = await q.order('full_name').range(from, from + PAGE_SIZE - 1)
       if (error) throw error
       return { rows: (data ?? []) as EmployeeRow[], total: count ?? 0 }
+    },
+  })
+
+  const activeEmployeeCount = useQuery({
+    queryKey: ['active-employee-count'],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_active', true)
+      if (error) throw error
+      return count
     },
   })
 
@@ -154,7 +166,18 @@ export default function UsersPage() {
 
       <section className="card">
         <div className="head-row">
-          <h2>Users</h2>
+          <div>
+            <h2>Users</h2>
+            {activeEmployeeCount.isError ? (
+              <span className="hint bad" role="alert">Could not load active employee count.</span>
+            ) : (
+              <span className="muted small">
+                {activeEmployeeCount.isLoading
+                  ? 'Loading active users...'
+                  : `${activeEmployeeCount.data ?? 0} active users`}
+              </span>
+            )}
+          </div>
           {isAdmin && <button onClick={() => setAdding(true)}><Icon name="plus" size={17} />Add employee</button>}
         </div>
         <p className="muted small">
@@ -192,6 +215,7 @@ export default function UsersPage() {
               <tr>
                 <th>Name</th>
                 <th>Email</th>
+                <th>Mobile number</th>
                 <th>Role</th>
                 <th>Job title</th>
                 <th>Status</th>
@@ -199,14 +223,15 @@ export default function UsersPage() {
               </tr>
             </thead>
             <tbody>
-              {employees.isLoading && <TableSkeleton columns={6} />}
+              {employees.isLoading && <TableSkeleton columns={7} />}
               {!employees.isLoading && rows.length === 0 && (
-                <TableEmptyState columns={6} message="No employees match these filters." />
+                <TableEmptyState columns={7} message="No employees match these filters." />
               )}
               {rows.map((u) => (
                 <tr key={u.id}>
                   <td><span className="person-cell"><Avatar name={u.full_name} />{u.full_name}</span></td>
                   <td>{u.email}</td>
+                  <td>{u.phone ?? '-'}</td>
                   <td>{ROLE_LABEL[u.role]}</td>
                   <td>{u.job_title ?? '-'}</td>
                   <td><StatusBadge status={u.is_active ? 'Active' : 'Inactive'} /></td>

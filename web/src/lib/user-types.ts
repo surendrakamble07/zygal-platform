@@ -4,6 +4,7 @@ export interface EmployeeRow {
   id: string
   full_name: string
   email: string
+  phone: string | null
   role: Role
   job_title: string | null
   is_active: boolean

@@ -59,6 +59,7 @@ Deno.serve(async (req) => {
     full_name?: string
     role?: string
     job_title?: string
+    phone?: string | null
     user_id?: string
     is_active?: boolean
     allowed_pages?: string[]
@@ -68,6 +69,9 @@ Deno.serve(async (req) => {
   } catch {
     return json({ error: 'Invalid request.' }, 400)
   }
+
+  if (body.phone !== undefined && body.phone !== null && typeof body.phone !== 'string')
+    return json({ error: 'Enter a valid mobile number.' }, 400)
 
   if (body.action === 'create') {
     const email = (body.email ?? '').trim().toLowerCase()
@@ -100,7 +104,8 @@ Deno.serve(async (req) => {
       full_name: fullName,
       role,
       job_title: body.job_title?.trim() || null,
-      allowed_pages: role === 'other' ? allowedPages : null,
+      phone: body.phone?.trim() || null,
+      allowed_pages: role === 'other' ? allowedPages : [],
     })
     if (profileErr) {
       await admin.auth.admin.deleteUser(created.user.id)
@@ -120,6 +125,8 @@ Deno.serve(async (req) => {
     }
     if (body.job_title !== undefined)
       patch.job_title = body.job_title?.trim() || null
+    if (body.phone !== undefined)
+      patch.phone = body.phone?.trim() || null
     if (body.full_name !== undefined) {
       if (!body.full_name.trim())
         return json({ error: 'Name cannot be empty.' }, 400)
@@ -131,7 +138,7 @@ Deno.serve(async (req) => {
         return json({ error: 'Limited users need at least one allowed page.' }, 400)
       patch.allowed_pages = allowedPages
     } else if (body.role && body.role !== 'other') {
-      patch.allowed_pages = null
+      patch.allowed_pages = []
     }
     const { error } = await admin.from('profiles').update(patch).eq('id', body.user_id)
     if (error) return json({ error: 'Could not update the employee.' }, 400)

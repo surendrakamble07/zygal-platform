@@ -58,6 +58,12 @@ function LoginGate() {
   return <LoginPage />
 }
 
+function DashboardHome() {
+  const { profile } = useAuth()
+  if (profile?.role === 'support') return <Navigate to="/my-activity" replace />
+  return <HomePage />
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -72,7 +78,7 @@ export default function App() {
               </Protected>
             }
           >
-            <Route index element={<HomePage />} />
+            <Route index element={<DashboardHome />} />
             <Route path="sites" element={<SitesPage />} />
             <Route path="sites/:siteId" element={<SiteDetail />} />
             <Route path="devices" element={<DevicesPage />} />

@@ -60,6 +60,10 @@ export default function Layout() {
   const [breakToStart, setBreakToStart] = useState<BreakType | null>(null);
   const [breakError, setBreakError] = useState("");
   const [clockNow, setClockNow] = useState(() => Date.now());
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [feedbackError, setFeedbackError] = useState("");
+  const [feedbackNotice, setFeedbackNotice] = useState("");
   const activeBreakQuery = useQuery({
     queryKey: [ACTIVE_BREAK_QUERY, profile?.id],
     enabled: !!profile?.id,
@@ -129,6 +133,17 @@ export default function Layout() {
         .select("id, user_id, break_type, started_at, planned_minutes, ended_at")
         .single();
       if (error) throw error;
+      try {
+        const { error: notificationError } = await supabase.functions.invoke(
+          "send-break-ended",
+          { body: { break_event_id: data.id } },
+        );
+        if (notificationError) {
+          console.error("Break ended, but the notification invocation failed.");
+        }
+      } catch {
+        console.error("Break ended, but the notification invocation failed.");
+      }
       return data as BreakEvent;
     },
     onSuccess: () => {
@@ -138,6 +153,45 @@ export default function Layout() {
     },
     onError: (error) => {
       setBreakError(error instanceof Error ? error.message : "Could not end the break.");
+    },
+  });
+  const sendFeedback = useMutation({
+    mutationFn: async (message: string) => {
+      const { data, error } = await supabase.functions.invoke<{
+        error?: string;
+        message?: string;
+        success?: boolean;
+      }>("send-feedback", { body: { message } });
+      if (error) {
+        let responseMessage = "";
+        if ("context" in error && error.context instanceof Response) {
+          try {
+            const body: unknown = await error.context.clone().json();
+            if (body && typeof body === "object") {
+              if ("error" in body && typeof body.error === "string") {
+                responseMessage = body.error;
+              } else if ("message" in body && typeof body.message === "string") {
+                responseMessage = body.message;
+              }
+            }
+          } catch {
+            // Use the clear fallback below when the function response is not JSON.
+          }
+        }
+        throw new Error(responseMessage || "Could not send feedback. Please try again.");
+      }
+      if (data?.error || data?.success === false) {
+        throw new Error(data.error ?? data.message ?? "Could not send feedback.");
+      }
+    },
+    onSuccess: () => {
+      setFeedbackMessage("");
+      setFeedbackError("");
+      setFeedbackOpen(false);
+      setFeedbackNotice("Thanks, your feedback was sent.");
+    },
+    onError: (error) => {
+      setFeedbackError(error instanceof Error ? error.message : "Could not send feedback.");
     },
   });
 
@@ -151,6 +205,7 @@ export default function Layout() {
 
   // Hiding a link is only a convenience. The database rules are the real protection.
   const items = NAV.filter((n) => {
+    if (profile.role === "support" && n.to === "/") return false;
     if (!n.roles || n.roles.includes(profile.role)) return true;
     if (profile.role === 'other') {
       const pageKey = n.to.replace(/^\//, '').replace(/\/$/, '') || 'dashboard';
@@ -240,6 +295,18 @@ export default function Layout() {
             </svg>
             {theme === "dark" ? "Light mode" : "Dark mode"}
           </button>
+          <button
+            type="button"
+            className="secondary topbar-action"
+            onClick={() => {
+              setFeedbackError("");
+              setFeedbackNotice("");
+              setFeedbackOpen(true);
+            }}
+          >
+            Feedback
+          </button>
+          {feedbackNotice && <span className="hint ok" role="status">{feedbackNotice}</span>}
           {activeBreak ? (
             <>
               <span
@@ -343,6 +410,64 @@ export default function Layout() {
               </button>
             </div>
           </section>
+        </div>
+      )}
+      {feedbackOpen && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !sendFeedback.isPending) {
+              setFeedbackOpen(false);
+            }
+          }}
+        >
+          <form
+            className="modal feedback-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="feedback-title"
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              const message = feedbackMessage.trim();
+              if (!message) {
+                setFeedbackError("Enter a feedback message before sending.");
+                return;
+              }
+              sendFeedback.mutate(message);
+            }}
+          >
+            <h2 id="feedback-title">Send feedback</h2>
+            <label>
+              Feedback message
+              <textarea
+                rows={6}
+                maxLength={2000}
+                value={feedbackMessage}
+                onChange={(event) => {
+                  setFeedbackMessage(event.target.value);
+                  if (event.target.value.trim()) setFeedbackError("");
+                }}
+                aria-required="true"
+                aria-invalid={!!feedbackError}
+                disabled={sendFeedback.isPending}
+              />
+            </label>
+            {feedbackError && <div className="banner error" role="alert">{feedbackError}</div>}
+            <div className="actions">
+              <button
+                type="button"
+                className="secondary"
+                disabled={sendFeedback.isPending}
+                onClick={() => setFeedbackOpen(false)}
+              >
+                Cancel
+              </button>
+              <button type="submit" disabled={sendFeedback.isPending}>
+                {sendFeedback.isPending ? "Sending..." : "Send"}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

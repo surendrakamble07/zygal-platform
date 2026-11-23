@@ -18,7 +18,7 @@ export interface StateRow {
 export interface Site {
   id: string;
   project_id: string;
-  project_type_id: string;
+  project_type_id: string | null;
   branch_code: string;
   branch_name: string | null;
   state: string | null;

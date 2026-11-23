@@ -30,6 +30,7 @@ export default function UserForm({ employee, onClose }: Props) {
   const qc = useQueryClient()
   const [email, setEmail] = useState(employee?.email ?? '')
   const [fullName, setFullName] = useState(employee?.full_name ?? '')
+  const [phone, setPhone] = useState(employee?.phone ?? '')
   const [role, setRole] = useState<Role>(employee?.role ?? 'support')
   const [jobTitle, setJobTitle] = useState(employee?.job_title ?? '')
   const [allowedPages, setAllowedPages] = useState<string[]>(() => employee?.allowed_pages ?? ['dashboard'])
@@ -69,6 +70,7 @@ export default function UserForm({ employee, onClose }: Props) {
         action: employee ? 'update' : 'create',
         user_id: employee?.id,
         full_name: fullName.trim(),
+        phone: phone.trim() || null,
         role,
         job_title: jobTitle,
       }
@@ -136,6 +138,16 @@ export default function UserForm({ employee, onClose }: Props) {
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               maxLength={120}
+            />
+          </label>
+
+          <label>
+            <span className='field-caption'>Mobile number <span className='field-optional'>Optional</span></span>
+            <input
+              type='tel'
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              maxLength={30}
             />
           </label>
 

@@ -322,13 +322,13 @@ export default function HomePage() {
           to="/sites?status=Active"
         />
         <KpiCard
-          label="Jobs this month"
+          label="Total Job"
           value={stats.data?.totalJobsThisMonth ?? "..."}
           icon="jobs"
           to={monthLink()}
         />
         <KpiCard
-          label="Completed this month"
+          label="Total Live"
           value={stats.data?.completedThisMonth ?? "..."}
           tone="ok"
           icon="reports"
@@ -342,7 +342,7 @@ export default function HomePage() {
           to={monthLink('handover')}
         />
         <KpiCard
-          label="Material pending"
+          label="Material Status"
           value={stats.data?.pendingMaterial ?? "..."}
           tone="bad"
           icon="devices"

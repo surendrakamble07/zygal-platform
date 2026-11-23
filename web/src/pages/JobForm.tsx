@@ -13,8 +13,9 @@ import {
   useVendorTypes,
 } from "../lib/job-queries";
 import { useDevicesForSite } from "../lib/device-queries";
-import { useProjects, useProjectTypes, useStates } from "../lib/queries";
+import { useProjectTypes } from "../lib/queries";
 import { friendlyJobError } from "../lib/job-errors";
+import { coordinatesFromMapLink } from "../lib/site-location";
 import type { Device } from "../lib/device-types";
 import type { Job } from "../lib/job-types";
 
@@ -27,21 +28,19 @@ interface Props {
 interface SiteDetails {
   id: string;
   project_id: string;
-  project_type_id: string;
-  branch_name: string | null;
-  state: string | null;
+  project_type_id: string | null;
   latitude: number | null;
   longitude: number | null;
+  status: "Active" | "Inactive";
 }
 
 interface SiteDraft {
   siteId: string;
   projectId: string;
   projectTypeId: string;
-  branchName: string;
-  stateName: string;
   latitude: string;
   longitude: string;
+  status: "Active" | "Inactive";
 }
 
 interface DeviceDraft {
@@ -136,9 +135,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
   const materialProblems = useMaterialProblems();
   const support = useSupportUsers();
   const vendorTypes = useVendorTypes();
-  const projects = useProjects();
   const projectTypes = useProjectTypes();
-  const states = useStates();
   const engineers = useQuery({
     queryKey: ["job-form-engineers"],
     staleTime: 10 * 60 * 1000,
@@ -176,6 +173,11 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
   const [hasMaterialIssue, setHasMaterialIssue] = useState(false);
   const [remark, setRemark] = useState(job?.remark ?? "");
   const [siteDraft, setSiteDraft] = useState<SiteDraft | null>(null);
+  const [siteMapLink, setSiteMapLink] = useState({
+    siteId: "",
+    value: "",
+    message: "",
+  });
   const [deviceDraft, setDeviceDraft] = useState<DeviceDraft | null>(null);
   const [persistedDeviceId, setPersistedDeviceId] = useState<string | null>(
     null,
@@ -187,6 +189,8 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
   const [materialDrafts, setMaterialDrafts] = useState<MaterialDraft[]>([]);
   const [error, setError] = useState("");
   const [persistedJobId, setPersistedJobId] = useState<string | null>(null);
+  const showMaterialIssueBlock =
+    handoverStatus === "Pending" && PENDING_FINAL_STATUSES.has(finalStatus);
 
   useEffect(() => {
     if (!job) return;
@@ -220,7 +224,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
       const { data, error: dbError } = await supabase
         .from("sites")
         .select(
-          "id, project_id, project_type_id, branch_name, state, latitude, longitude",
+          "id, project_id, project_type_id, latitude, longitude, status",
         )
         .eq("id", siteId)
         .single();
@@ -265,13 +269,12 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
         ? {
             siteId,
             projectId: loadedSite.project_id,
-            projectTypeId: loadedSite.project_type_id,
-            branchName: loadedSite.branch_name ?? "",
-            stateName: loadedSite.state ?? "",
+            projectTypeId: loadedSite.project_type_id ?? "",
             latitude:
               loadedSite.latitude == null ? "" : String(loadedSite.latitude),
             longitude:
               loadedSite.longitude == null ? "" : String(loadedSite.longitude),
+            status: loadedSite.status ?? "Active",
           }
         : null;
   const defaultDevice =
@@ -324,15 +327,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
       projectTypeId:
         current && current.siteId === siteId
           ? current.projectTypeId
-          : loadedSite.project_type_id,
-      branchName:
-        current && current.siteId === siteId
-          ? current.branchName
-          : (loadedSite.branch_name ?? ""),
-      stateName:
-        current && current.siteId === siteId
-          ? current.stateName
-          : (loadedSite.state ?? ""),
+          : loadedSite.project_type_id ?? "",
       latitude:
         current && current.siteId === siteId
           ? current.latitude
@@ -345,8 +340,29 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
           : loadedSite.longitude == null
             ? ""
             : String(loadedSite.longitude),
+      status:
+        current && current.siteId === siteId
+          ? current.status
+          : loadedSite.status ?? "Active",
       ...patch,
     }));
+  }
+
+  function updateSiteMapLink(value: string) {
+    const coordinates = coordinatesFromMapLink(value.trim());
+    setSiteMapLink({
+      siteId,
+      value,
+      message: value.trim() && !coordinates
+        ? "Coordinates not found. Enter latitude and longitude manually."
+        : "",
+    });
+    if (coordinates) {
+      updateSiteDraft({
+        latitude: String(coordinates.latitude),
+        longitude: String(coordinates.longitude),
+      });
+    }
   }
 
   function chooseDevice(deviceId: string) {
@@ -404,6 +420,9 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
         throw new Error(
           "Wait for the selected site's details to finish loading.",
         );
+      if (siteDetails.data.project_type_id === null && !siteValues.projectTypeId) {
+        throw new JobFormValidationError("Choose a project type for this site.");
+      }
       const lat = coordinateValue(siteValues.latitude);
       const lng = coordinateValue(siteValues.longitude);
       if (Number.isNaN(lat) || Number.isNaN(lng)) {
@@ -437,7 +456,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
         );
       }
       if (
-        finalStatus === "WIP"
+        showMaterialIssueBlock
         && hasMaterialIssue
         && !materialDrafts.some((material) => material.item && material.problem)
       ) {
@@ -528,6 +547,32 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
         }
       }
 
+      const currentSite = siteDetails.data;
+      if (currentSite.project_type_id === null) {
+        const sitePatch = {
+          project_type_id: siteValues.projectTypeId,
+          latitude: lat,
+          longitude: lng,
+          status: siteValues.status,
+        };
+        if (
+          currentSite.project_type_id !== sitePatch.project_type_id ||
+          currentSite.latitude !== sitePatch.latitude ||
+          currentSite.longitude !== sitePatch.longitude ||
+          currentSite.status !== sitePatch.status
+        ) {
+          const { error: siteError } = await supabase
+            .from("sites")
+            .update(sitePatch)
+            .eq("id", siteId);
+          if (siteError) {
+            throw new JobFormValidationError(
+              `Could not save site details: ${siteError.message}`,
+            );
+          }
+        }
+      }
+
       let savedJobId = job?.id ?? persistedJobId;
       if (!savedJobId) {
         const { data, error: insertError } = await supabase
@@ -565,34 +610,6 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
       }
 
       if (!savedJobId) throw new Error("The job could not be saved.");
-
-      const sitePatch = {
-        project_id: siteValues.projectId,
-        project_type_id: siteValues.projectTypeId,
-        branch_name: siteValues.branchName.trim() || null,
-        state: siteValues.stateName || null,
-        latitude: lat,
-        longitude: lng,
-      };
-      const currentSite = siteDetails.data;
-      if (
-        currentSite.project_id !== sitePatch.project_id ||
-        currentSite.project_type_id !== sitePatch.project_type_id ||
-        currentSite.branch_name !== sitePatch.branch_name ||
-        currentSite.state !== sitePatch.state ||
-        currentSite.latitude !== sitePatch.latitude ||
-        currentSite.longitude !== sitePatch.longitude
-      ) {
-        const { error: siteError } = await supabase
-          .from("sites")
-          .update(sitePatch)
-          .eq("id", siteId);
-        if (siteError) {
-          throw new Error(
-            "Job saved, but the site details could not be saved. Review the site details and try again.",
-          );
-        }
-      }
 
       const shouldSaveDevice =
         !!existingDeviceId ||
@@ -749,7 +766,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
     if (!callTakenBy) return setError("Choose who took the call.");
     if (!finalStatus) return setError("Choose a final status.");
     if (
-      finalStatus === "WIP"
+      showMaterialIssueBlock
       && hasMaterialIssue
       && !materialDrafts.some((material) => material.item && material.problem)
     ) {
@@ -802,9 +819,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
     materialProblems.isLoading ||
     engineers.isLoading ||
     support.isLoading ||
-    projects.isLoading ||
-    projectTypes.isLoading ||
-    states.isLoading;
+    projectTypes.isLoading;
   const lookupError =
     callTypes.isError ||
     handoverStatuses.isError ||
@@ -813,9 +828,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
     materialProblems.isError ||
     engineers.isError ||
     support.isError ||
-    projects.isError ||
-    projectTypes.isError ||
-    states.isError;
+    projectTypes.isError;
   return (
     <div
       className="modal-backdrop"
@@ -965,59 +978,30 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
               </div>
             </fieldset>
 
-            <fieldset className="form-section">
-              <legend>
-                Site details{" "}
-                <span className="field-optional">shared site record</span>
-              </legend>
-              {!siteId ? (
-                <p className="muted small">
-                  Enter an existing branch code to load and update its site
-                  details.
-                </p>
-              ) : siteDetails.isError ? (
-                <div className="banner error" role="alert">
-                  Could not load this site's details. Please retry or use Sites.
-                </div>
-              ) : !siteReady ? (
-                <div className="form-loading">
-                  <span className="skeleton-bar" />
-                  <span className="skeleton-bar" />
-                </div>
-              ) : (
+            {siteId && siteDetails.isError && (
+              <div className="banner error" role="alert">
+                Could not load this site's details. Please retry or use Sites.
+              </div>
+            )}
+            {siteId && !siteReady && !siteDetails.isError && (
+              <div className="form-loading">
+                <span className="skeleton-bar" />
+                <span className="skeleton-bar" />
+              </div>
+            )}
+            {siteReady && loadedSite?.project_type_id === null && (
+              <fieldset className="form-section">
+                <legend>
+                  Site details{" "}
+                  <span className="field-optional">complete this site record</span>
+                </legend>
                 <div className="grid-form">
-                  <label>
-                    <span className="field-caption">
-                      Project <span className="field-required">*</span>
-                    </span>
-                    <select
-                      value={siteValues?.projectId ?? ""}
-                      onChange={(e) =>
-                        updateSiteDraft({
-                          projectId: e.target.value,
-                          projectTypeId: "",
-                        })
-                      }
-                    >
-                      <option value="">Select project</option>
-                      {(projects.data ?? [])
-                        .filter(
-                          (project) =>
-                            project.is_active ||
-                            project.id === siteValues?.projectId,
-                        )
-                        .map((project) => (
-                          <option key={project.id} value={project.id}>
-                            {project.name}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
                   <label>
                     <span className="field-caption">
                       Project type <span className="field-required">*</span>
                     </span>
                     <select
+                      aria-required="true"
                       value={siteValues?.projectTypeId ?? ""}
                       onChange={(e) =>
                         updateSiteDraft({ projectTypeId: e.target.value })
@@ -1034,41 +1018,48 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                   </label>
                   <label>
                     <span className="field-caption">
-                      Branch name{" "}
+                      Status <span className="field-required">*</span>
+                    </span>
+                    <select
+                      value={siteValues?.status ?? "Active"}
+                      onChange={(e) =>
+                        updateSiteDraft({
+                          status: e.target.value === "Inactive" ? "Inactive" : "Active",
+                        })
+                      }
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Inactive">Inactive</option>
+                    </select>
+                  </label>
+                  <label className="full">
+                    <span className="field-caption">
+                      Google Maps link{" "}
                       <span className="field-optional">Optional</span>
                     </span>
                     <input
-                      value={siteValues?.branchName ?? ""}
-                      onChange={(e) =>
-                        updateSiteDraft({ branchName: e.target.value })
-                      }
-                      maxLength={120}
+                      type="url"
+                      value={siteMapLink.siteId === siteId ? siteMapLink.value : ""}
+                      onChange={(e) => updateSiteMapLink(e.target.value)}
+                      onPaste={(e) => {
+                        const pasted = e.clipboardData.getData("text").trim();
+                        if (!pasted) return;
+                        e.preventDefault();
+                        updateSiteMapLink(pasted);
+                      }}
+                      placeholder="Paste a Google Maps link to fill coordinates"
                     />
-                  </label>
-                  <label>
-                    <span className="field-caption">
-                      State <span className="field-optional">Optional</span>
-                    </span>
-                    <select
-                      value={siteValues?.stateName ?? ""}
-                      onChange={(e) =>
-                        updateSiteDraft({ stateName: e.target.value })
-                      }
-                    >
-                      <option value="">Select state</option>
-                      {(states.data ?? []).map((state) => (
-                        <option key={state.name} value={state.name}>
-                          {state.name}
-                        </option>
-                      ))}
-                    </select>
+                    {siteMapLink.siteId === siteId && siteMapLink.message && (
+                      <span className="hint" role="status">{siteMapLink.message}</span>
+                    )}
                   </label>
                   <label>
                     <span className="field-caption">
                       Latitude <span className="field-optional">Optional</span>
                     </span>
                     <input
-                      inputMode="decimal"
+                      type="number"
+                      step="any"
                       value={siteValues?.latitude ?? ""}
                       onChange={(e) =>
                         updateSiteDraft({ latitude: e.target.value })
@@ -1081,7 +1072,8 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                       Longitude <span className="field-optional">Optional</span>
                     </span>
                     <input
-                      inputMode="decimal"
+                      type="number"
+                      step="any"
                       value={siteValues?.longitude ?? ""}
                       onChange={(e) =>
                         updateSiteDraft({ longitude: e.target.value })
@@ -1090,8 +1082,8 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                     />
                   </label>
                 </div>
-              )}
-            </fieldset>
+              </fieldset>
+            )}
 
             <fieldset className="form-section">
               <legend>
@@ -1269,7 +1261,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                       value={finalStatus}
                       onChange={(e) => {
                         setFinalStatus(e.target.value);
-                        if (e.target.value !== "WIP") {
+                        if (!PENDING_FINAL_STATUSES.has(e.target.value)) {
                           setHasMaterialIssue(false);
                           setMaterialDrafts([]);
                         }
@@ -1287,7 +1279,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                 )}
               </div>
 
-              {finalStatus === "WIP" && (
+              {showMaterialIssueBlock && (
                 <label>
                   Any material issue?
                   <select
@@ -1306,7 +1298,7 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                 </label>
               )}
 
-              {finalStatus === "WIP" && hasMaterialIssue && (
+              {showMaterialIssueBlock && hasMaterialIssue && (
               <div className="material-entry-list">
                 <div className="head-row">
                   <div>
