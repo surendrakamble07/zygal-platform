@@ -58,6 +58,7 @@ export default function Layout() {
     document.documentElement.dataset.theme === "dark" ? "dark" : "light",
   );
   const [breakToStart, setBreakToStart] = useState<BreakType | null>(null);
+  const [startRemark, setStartRemark] = useState("");
   const [breakError, setBreakError] = useState("");
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -85,7 +86,7 @@ export default function Layout() {
   const activeBreak = activeBreakQuery.data ?? null;
   const activeBreakId = activeBreak?.id;
   const startBreak = useMutation({
-    mutationFn: async (breakType: BreakType) => {
+    mutationFn: async ({ breakType, remark }: { breakType: BreakType; remark: string }) => {
       if (!profile?.id) throw new Error("Your profile is unavailable.");
       const { data: existingBreak, error: existingBreakError } = await supabase
         .from("break_events")
@@ -104,14 +105,25 @@ export default function Layout() {
           break_type: breakType,
           started_at: new Date().toISOString(),
           planned_minutes: breakType === "Lunch" ? 40 : 10,
+          start_remark: remark.trim(),
         })
         .select("id, user_id, break_type, started_at, planned_minutes, ended_at")
         .single();
       if (error) throw error;
+      void supabase.functions.invoke("send-break-start", {
+        body: { break_event_id: data.id },
+      }).then(({ error: notificationError }) => {
+        if (notificationError) {
+          console.error("Break started, but the admin notification invocation failed.");
+        }
+      }).catch(() => {
+        console.error("Break started, but the admin notification invocation failed.");
+      });
       return data as BreakEvent;
     },
     onSuccess: (event) => {
       setBreakError("");
+      setStartRemark("");
       setBreakToStart(null);
       queryClient.setQueryData([ACTIVE_BREAK_QUERY, profile?.id], event);
       void queryClient.invalidateQueries({ queryKey: [ACTIVE_BREAK_QUERY, profile?.id] });
@@ -334,6 +346,7 @@ export default function Layout() {
                 disabled={activeBreakQuery.isLoading || activeBreakQuery.isError || startBreak.isPending}
                 onClick={() => {
                   setBreakError("");
+                  setStartRemark("");
                   setBreakToStart("Lunch");
                 }}
               >
@@ -345,6 +358,7 @@ export default function Layout() {
                 disabled={activeBreakQuery.isLoading || activeBreakQuery.isError || startBreak.isPending}
                 onClick={() => {
                   setBreakError("");
+                  setStartRemark("");
                   setBreakToStart("Tea");
                 }}
               >
@@ -388,6 +402,21 @@ export default function Layout() {
             <p>
               Start your {breakToStart === "Lunch" ? "40-minute lunch" : "10-minute tea"} break?
             </p>
+            <label>
+              What are you stepping away from? (required)
+              <textarea
+                rows={4}
+                required
+                value={startRemark}
+                onChange={(event) => {
+                  setStartRemark(event.target.value);
+                  if (event.target.value.trim()) setBreakError("");
+                }}
+                aria-required="true"
+                aria-invalid={!!breakError}
+                disabled={startBreak.isPending}
+              />
+            </label>
             {breakError && <div className="banner error" role="alert">{breakError}</div>}
             <div className="actions">
               <button
@@ -396,6 +425,7 @@ export default function Layout() {
                 disabled={startBreak.isPending}
                 onClick={() => {
                   setBreakToStart(null);
+                  setStartRemark("");
                   setBreakError("");
                 }}
               >
@@ -403,8 +433,8 @@ export default function Layout() {
               </button>
               <button
                 type="button"
-                disabled={startBreak.isPending}
-                onClick={() => startBreak.mutate(breakToStart)}
+                disabled={startBreak.isPending || !startRemark.trim()}
+                onClick={() => startBreak.mutate({ breakType: breakToStart, remark: startRemark })}
               >
                 {startBreak.isPending ? "Starting..." : "Confirm"}
               </button>

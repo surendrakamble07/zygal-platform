@@ -139,6 +139,7 @@ Deno.serve(async (req: Request) => {
   const smtpUser = Deno.env.get("SMTP_USER");
   const smtpPass = Deno.env.get("SMTP_PASS");
   const smtpFrom = Deno.env.get("SMTP_FROM");
+  const adminEmail = Deno.env.get("ADMIN_NOTIFY_EMAIL")?.trim() ?? "";
   if (
     !supabaseUrl
     || !serviceRoleKey
@@ -277,36 +278,138 @@ Deno.serve(async (req: Request) => {
       },
     });
 
-    let deliveryStatus: "accepted" | "rejected" | "uncertain" = "uncertain";
     try {
-      const info = await transporter.sendMail({
-        from: smtpFrom,
-        to: recipient,
-        subject: `Your ${claim.break_type} break has ended`,
-        text: [
-          `Your ${claim.break_type} break has ended.`,
-          "",
-          `Started: ${startedAt.toISOString()}`,
-          `Ended: ${endedAt.toISOString()}`,
-          `Planned duration: ${claim.planned_minutes} minutes`,
-        ].join("\n"),
-      });
-      const accepted = Array.isArray(info.accepted)
-        && info.accepted.some((address: unknown) => recipientMatches(address, recipient));
-      const rejected = Array.isArray(info.rejected)
-        && info.rejected.some((address: unknown) => recipientMatches(address, recipient));
-      if (accepted) {
-        deliveryStatus = "accepted";
-      } else if (rejected) {
-        deliveryStatus = "rejected";
+      let deliveryStatus: "accepted" | "rejected" | "uncertain" = "uncertain";
+      try {
+        const info = await transporter.sendMail({
+          from: smtpFrom,
+          to: recipient,
+          subject: `Your ${claim.break_type} break has ended`,
+          text: [
+            `Your ${claim.break_type} break has ended.`,
+            "",
+            `Started: ${startedAt.toISOString()}`,
+            `Ended: ${endedAt.toISOString()}`,
+            `Planned duration: ${claim.planned_minutes} minutes`,
+          ].join("\n"),
+        });
+        const accepted = Array.isArray(info.accepted)
+          && info.accepted.some((address: unknown) => recipientMatches(address, recipient));
+        const rejected = Array.isArray(info.rejected)
+          && info.rejected.some((address: unknown) => recipientMatches(address, recipient));
+        if (accepted) {
+          deliveryStatus = "accepted";
+        } else if (rejected) {
+          deliveryStatus = "rejected";
+        }
+      } catch (error) {
+        const responseCode = getSmtpResponseCode(error);
+        if (responseCode !== null && responseCode >= 400 && responseCode < 600) {
+          deliveryStatus = "rejected";
+        } else {
+          console.error("SMTP delivery outcome is uncertain");
+        }
       }
-    } catch (error) {
-      const responseCode = getSmtpResponseCode(error);
-      if (responseCode !== null && responseCode >= 400 && responseCode < 600) {
-        deliveryStatus = "rejected";
+
+      if (deliveryStatus === "uncertain") {
+        return json(
+          {
+            error: "Email delivery outcome is uncertain; notification remains in sending state for manual recovery",
+            status: "sending",
+          },
+          502,
+        );
+      }
+
+      if (deliveryStatus === "rejected") {
+        const failureRecorded = await recordFailure("SMTP server rejected email delivery.");
+        if (!failureRecorded) {
+          return json(
+            {
+              error: "SMTP rejected the email, but notification status could not be updated",
+              status: "sending",
+            },
+            502,
+          );
+        }
+        return json(
+          { error: "SMTP server rejected email delivery; the notification may be retried", status: "failed" },
+          502,
+        );
+      }
+
+      if (!adminEmail) {
+        console.error("Employee break-end email was sent, but ADMIN_NOTIFY_EMAIL is not configured");
       } else {
-        console.error("SMTP delivery outcome is uncertain");
+        try {
+          const [{ data: breakEvent, error: breakError }, { data: profile, error: profileError }] =
+            await Promise.all([
+              supabase
+                .from("break_events")
+                .select("start_remark")
+                .eq("id", breakEventId)
+                .eq("user_id", userId)
+                .maybeSingle(),
+              supabase
+                .from("profiles")
+                .select("full_name")
+                .eq("id", userId)
+                .maybeSingle(),
+            ]);
+
+          if (breakError || !breakEvent) {
+            console.error("Could not fetch break remark for the admin break-end email");
+          } else if (profileError || !profile) {
+            console.error("Could not fetch employee name for the admin break-end email");
+          } else {
+            const fullName = profile.full_name?.trim() || "Employee";
+            const subjectName = fullName.replace(/[\r\n]+/g, " ");
+            const actualDurationMinutes =
+              (endedAt.getTime() - startedAt.getTime()) / 60_000;
+            const info = await transporter.sendMail({
+              from: smtpFrom,
+              to: adminEmail,
+              subject: `Employee Ended ${claim.break_type} Break – ${subjectName}`,
+              text: [
+                `Employee: ${fullName}`,
+                `Break Type: ${claim.break_type}`,
+                `Started At: ${startedAt.toISOString()}`,
+                `Ended At: ${endedAt.toISOString()}`,
+                `Actual Duration: ${actualDurationMinutes.toFixed(1)} minutes`,
+                `Planned Duration: ${claim.planned_minutes} minutes`,
+                `Remark: ${breakEvent.start_remark?.trim() || ""}`,
+              ].join("\n"),
+            });
+            const adminAccepted = Array.isArray(info.accepted)
+              && info.accepted.some((address: unknown) =>
+                recipientMatches(address, adminEmail)
+              );
+            if (!adminAccepted) {
+              console.error("Employee break-end email was sent, but SMTP did not accept the admin copy");
+            }
+          }
+        } catch {
+          console.error("Employee break-end email was sent, but the admin copy failed");
+        }
       }
+
+      const { data: markedSent, error: markSentError } = await supabase.rpc(
+        "mark_break_end_notification_sent",
+        {
+          p_break_event_id: breakEventId,
+          p_user_id: userId,
+          p_claim_token: claimToken,
+        },
+      );
+      if (markSentError || markedSent !== true) {
+        console.error("Email was accepted, but its sent status could not be recorded");
+        return json(
+          { error: "Email was accepted, but notification status could not be recorded" },
+          502,
+        );
+      }
+
+      return json({ success: true, status: "sent" });
     } finally {
       try {
         transporter.close();
@@ -314,51 +417,6 @@ Deno.serve(async (req: Request) => {
         console.error("Could not close SMTP transport");
       }
     }
-
-    if (deliveryStatus === "uncertain") {
-      return json(
-        {
-          error: "Email delivery outcome is uncertain; notification remains in sending state for manual recovery",
-          status: "sending",
-        },
-        502,
-      );
-    }
-
-    if (deliveryStatus === "rejected") {
-      const failureRecorded = await recordFailure("SMTP server rejected email delivery.");
-      if (!failureRecorded) {
-        return json(
-          {
-            error: "SMTP rejected the email, but notification status could not be updated",
-            status: "sending",
-          },
-          502,
-        );
-      }
-      return json(
-        { error: "SMTP server rejected email delivery; the notification may be retried", status: "failed" },
-        502,
-      );
-    }
-
-    const { data: markedSent, error: markSentError } = await supabase.rpc(
-      "mark_break_end_notification_sent",
-      {
-        p_break_event_id: breakEventId,
-        p_user_id: userId,
-        p_claim_token: claimToken,
-      },
-    );
-    if (markSentError || markedSent !== true) {
-      console.error("Email was accepted, but its sent status could not be recorded");
-      return json(
-        { error: "Email was accepted, but notification status could not be recorded" },
-        502,
-      );
-    }
-
-    return json({ success: true, status: "sent" });
   } catch {
     console.error("Unexpected send-break-ended failure");
     return json({ error: "Internal server error" }, 500);

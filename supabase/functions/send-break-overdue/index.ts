@@ -2,7 +2,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import nodemailer from "npm:nodemailer@^9";
 
 interface ClaimedBreak {
-  claimed_break_event_id: number | string;
+  break_event_id: number | string;
   claim_token: string;
   recipient_email: string | null;
   break_type: string;
@@ -10,17 +10,10 @@ interface ClaimedBreak {
   planned_minutes: number;
 }
 
-interface EligibilityResult {
-  eligible: boolean;
-  recipient_email: string | null;
-}
-
 interface Counts {
-  stale_recovered: number;
   claimed: number;
   sent: number;
   failed: number;
-  uncertain: number;
   skipped: number;
 }
 
@@ -66,7 +59,7 @@ function isUuid(value: unknown): value is string {
 function isClaimedBreak(value: unknown): value is ClaimedBreak {
   if (!isRecord(value)) return false;
 
-  return normalizeBreakEventId(value.claimed_break_event_id) !== null
+  return normalizeBreakEventId(value.break_event_id) !== null
     && isUuid(value.claim_token)
     && (value.recipient_email === null
       || typeof value.recipient_email === "string")
@@ -76,14 +69,6 @@ function isClaimedBreak(value: unknown): value is ClaimedBreak {
     && typeof value.planned_minutes === "number"
     && Number.isInteger(value.planned_minutes)
     && value.planned_minutes > 0;
-}
-
-function isEligibilityResult(value: unknown): value is EligibilityResult {
-  if (!isRecord(value)) return false;
-
-  return typeof value.eligible === "boolean"
-    && (value.recipient_email === null
-      || typeof value.recipient_email === "string");
 }
 
 function isValidEmail(value: string): boolean {
@@ -118,17 +103,6 @@ function recipientMatches(value: unknown, recipient: string): boolean {
   }
 
   return false;
-}
-
-function emptyCounts(): Counts {
-  return {
-    stale_recovered: 0,
-    claimed: 0,
-    sent: 0,
-    failed: 0,
-    uncertain: 0,
-    skipped: 0,
-  };
 }
 
 async function parseEmptyJsonObject(req: Request): Promise<boolean> {
@@ -194,6 +168,7 @@ Deno.serve(async (req: Request) => {
   const smtpUser = Deno.env.get("SMTP_USER")?.trim();
   const smtpPass = Deno.env.get("SMTP_PASS");
   const smtpFrom = Deno.env.get("SMTP_FROM")?.trim();
+  const adminEmail = Deno.env.get("ADMIN_NOTIFY_EMAIL")?.trim() ?? "";
 
   if (
     !supabaseUrl
@@ -209,61 +184,32 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Server configuration error" }, 500);
   }
 
-  const counts = emptyCounts();
+  const counts: Counts = { claimed: 0, sent: 0, failed: 0, skipped: 0 };
+  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
 
-  let supabase;
-  try {
-    supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
-    });
-  } catch {
-    console.error("Could not create the send-break-overdue database client");
-    return json({ error: "Internal server error" }, 500);
-  }
-
-  let transporter: ReturnType<typeof nodemailer.createTransport>;
-  try {
-    transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: 465,
-      secure: true,
-      auth: {
-        user: smtpUser,
-        pass: smtpPass,
-      },
-      connectionTimeout: 8_000,
-      greetingTimeout: 8_000,
-      socketTimeout: 15_000,
-    });
-  } catch {
-    console.error("Could not create the send-break-overdue SMTP transport");
-    return json({ error: "Server configuration error" }, 500);
-  }
+  const transporter = nodemailer.createTransport({
+    host: smtpHost,
+    port: 465,
+    secure: true,
+    auth: {
+      user: smtpUser,
+      pass: smtpPass,
+    },
+    connectionTimeout: 8_000,
+    greetingTimeout: 8_000,
+    socketTimeout: 15_000,
+  });
 
   try {
-    const { data: recoveredCount, error: recoveryError } = await supabase.rpc(
-      "mark_stale_break_overdue_notifications_uncertain",
-    );
-
-    if (
-      recoveryError
-      || typeof recoveredCount !== "number"
-      || !Number.isInteger(recoveredCount)
-      || recoveredCount < 0
-    ) {
-      console.error("Could not recover stale overdue-notification claims");
-      return json({ error: "Could not prepare overdue notifications" }, 500);
-    }
-
-    counts.stale_recovered = recoveredCount;
-
     const { data: claimedData, error: claimError } = await supabase.rpc(
       "claim_due_break_overdue_notifications",
-      { p_limit: 1 },
+      { p_limit: 20 },
     );
 
     if (claimError || !Array.isArray(claimedData)) {
@@ -280,188 +226,133 @@ Deno.serve(async (req: Request) => {
     counts.claimed = claimedBreaks.length;
 
     for (const claimedBreak of claimedBreaks) {
-      const breakEventId = normalizeBreakEventId(
-        claimedBreak.claimed_break_event_id,
-      );
-
+      const breakEventId = normalizeBreakEventId(claimedBreak.break_event_id);
       if (!breakEventId) {
         console.error("Overdue-notification claim returned an invalid event ID");
         counts.skipped++;
         continue;
       }
 
-      let eligibilityData: unknown;
-      let eligibilityError: unknown;
+      const recipient = claimedBreak.recipient_email?.trim() ?? "";
+      let employeeDeliverySucceeded = false;
+      let employeeDeliveryError = "";
+      const startedAt = new Date(claimedBreak.started_at);
+      const overdueByMinutes = Math.max(
+        0,
+        (Date.now()
+          - (startedAt.getTime() + claimedBreak.planned_minutes * 60_000))
+          / 60_000,
+      );
 
+      let fullName = "Employee";
       try {
-        const result = await supabase.rpc(
-          "authorize_break_overdue_notification_send",
-          {
-            p_break_event_id: breakEventId,
-            p_claim_token: claimedBreak.claim_token,
-          },
-        );
-        eligibilityData = result.data;
-        eligibilityError = result.error;
-      } catch {
-        console.error("Could not verify overdue-notification eligibility");
-        counts.skipped++;
-        continue;
-      }
+        const { data: breakEvent, error: breakError } = await supabase
+          .from("break_events")
+          .select("user_id")
+          .eq("id", breakEventId)
+          .maybeSingle();
 
-      if (eligibilityError || !Array.isArray(eligibilityData)) {
-        console.error("Could not verify overdue-notification eligibility");
-        counts.skipped++;
-        continue;
-      }
-
-      if (
-        eligibilityData.length !== 1
-        || !isEligibilityResult(eligibilityData[0])
-      ) {
-        console.error("Eligibility check returned invalid data");
-        counts.skipped++;
-        continue;
-      }
-
-      const eligibility = eligibilityData[0];
-      if (!eligibility.eligible) {
-        counts.skipped++;
-        continue;
-      }
-
-      const recipient = eligibility.recipient_email?.trim() ?? "";
-      if (!isValidEmail(recipient)) {
-        console.error("Eligibility check returned an invalid recipient");
-        counts.skipped++;
-        continue;
-      }
-
-      let delivery: "accepted" | "rejected" | "uncertain" = "uncertain";
-
-      try {
-        const info = await transporter.sendMail({
-          from: smtpFrom,
-          to: recipient,
-          subject: `Your ${claimedBreak.break_type} break is overdue`,
-          text:
-            `Your ${claimedBreak.break_type} break has exceeded its planned duration. `
-            + "Please update your break status in ZYGAL Team Operations.",
-        });
-
-        const accepted = Array.isArray(info.accepted)
-          && info.accepted.some((address: unknown) =>
-            recipientMatches(address, recipient)
-          );
-        const rejected = Array.isArray(info.rejected)
-          && info.rejected.some((address: unknown) =>
-            recipientMatches(address, recipient)
-          );
-
-        if (accepted) {
-          delivery = "accepted";
-        } else if (rejected) {
-          delivery = "rejected";
+        if (breakError || !breakEvent) {
+          console.error("Could not find employee for overdue break notification");
         } else {
-          console.error("SMTP returned no confirmed delivery outcome");
-        }
-      } catch {
-        delivery = "uncertain";
-        console.error("SMTP delivery outcome is uncertain");
-      }
-
-      if (delivery === "accepted") {
-        let markedSent = false;
-
-        try {
-          const result = await supabase.rpc(
-            "mark_break_overdue_notification_sent",
-            {
-              p_break_event_id: breakEventId,
-              p_claim_token: claimedBreak.claim_token,
-            },
-          );
-          markedSent = !result.error && result.data === true;
-        } catch {
-          console.error("Could not record accepted overdue email");
-        }
-
-        if (markedSent) {
-          counts.sent++;
-        } else {
-          console.error("Accepted overdue email status could not be recorded");
-          counts.uncertain++;
-
-          try {
-            await supabase.rpc(
-              "mark_break_overdue_notification_uncertain",
-              {
-                p_break_event_id: breakEventId,
-                p_claim_token: claimedBreak.claim_token,
-              },
-            );
-          } catch {
-            console.error("Could not record uncertain overdue email status");
+          const { data: profile, error: profileError } = await supabase
+            .from("profiles")
+            .select("full_name")
+            .eq("id", breakEvent.user_id)
+            .maybeSingle();
+          if (profileError || !profile) {
+            console.error("Could not fetch employee name for overdue notification");
+          } else {
+            fullName = profile.full_name?.trim() || "Employee";
           }
         }
-
-        continue;
+      } catch {
+        console.error("Could not fetch employee name for overdue notification");
       }
 
-      if (delivery === "rejected") {
-        let markedFailed = false;
-
+      if (!isValidEmail(recipient)) {
+        employeeDeliveryError = "Employee email address is missing or invalid.";
+      } else {
         try {
-          const result = await supabase.rpc(
-            "mark_break_overdue_notification_failed",
-            {
-              p_break_event_id: breakEventId,
-              p_claim_token: claimedBreak.claim_token,
-            },
-          );
-          markedFailed = !result.error && result.data === true;
+          const info = await transporter.sendMail({
+            from: smtpFrom,
+            to: recipient,
+            subject: `Your ${claimedBreak.break_type} break is overdue`,
+            text:
+              `Your ${claimedBreak.break_type} break has exceeded its planned duration. `
+              + "Please update your break status in ZYGAL Team Operations.",
+          });
+          employeeDeliverySucceeded = Array.isArray(info.accepted)
+            && info.accepted.some((address: unknown) =>
+              recipientMatches(address, recipient)
+            );
+          if (!employeeDeliverySucceeded) {
+            employeeDeliveryError = "SMTP did not accept the employee email.";
+          }
         } catch {
-          console.error("Could not record rejected overdue email");
+          employeeDeliveryError = "SMTP failed to send the employee email.";
+          console.error("Overdue employee email delivery failed");
         }
+      }
 
-        if (markedFailed) {
+      if (!adminEmail) {
+        console.error("Overdue employee email was attempted, but ADMIN_NOTIFY_EMAIL is not configured");
+      } else {
+        try {
+          const subjectName = fullName.replace(/[\r\n]+/g, " ");
+          const info = await transporter.sendMail({
+            from: smtpFrom,
+            to: adminEmail,
+            subject: `Overdue ${claimedBreak.break_type} Break Alert – ${subjectName}`,
+            text: [
+              `Employee: ${fullName}`,
+              `Break Type: ${claimedBreak.break_type}`,
+              `Started At: ${startedAt.toISOString()}`,
+              `Planned Duration: ${claimedBreak.planned_minutes} minutes`,
+              `Overdue By: ${overdueByMinutes.toFixed(1)} minutes`,
+            ].join("\n"),
+          });
+          const adminAccepted = Array.isArray(info.accepted)
+            && info.accepted.some((address: unknown) =>
+              recipientMatches(address, adminEmail)
+            );
+          if (!adminAccepted) {
+            console.error("SMTP did not accept the overdue admin email");
+          }
+        } catch {
+          console.error("Overdue employee email was attempted, but the admin copy failed");
+        }
+      }
+
+      if (employeeDeliverySucceeded) {
+        const { data: markedSent, error: markSentError } = await supabase.rpc(
+          "mark_break_overdue_notification_sent",
+          {
+            break_event_id: breakEventId,
+            claim_token: claimedBreak.claim_token,
+          },
+        );
+        if (markSentError || markedSent !== true) {
+          console.error("Employee overdue email was accepted, but sent status could not be recorded");
           counts.failed++;
         } else {
-          console.error("Rejected overdue email status could not be recorded");
-          counts.uncertain++;
-
-          try {
-            await supabase.rpc(
-              "mark_break_overdue_notification_uncertain",
-              {
-                p_break_event_id: breakEventId,
-                p_claim_token: claimedBreak.claim_token,
-              },
-            );
-          } catch {
-            console.error("Could not record uncertain overdue email status");
-          }
+          counts.sent++;
         }
-
-        continue;
-      }
-
-      counts.uncertain++;
-
-      try {
-        const result = await supabase.rpc(
-          "mark_break_overdue_notification_uncertain",
+      } else {
+        const { data: markedFailed, error: markFailedError } = await supabase.rpc(
+          "mark_break_overdue_notification_failed",
           {
-            p_break_event_id: breakEventId,
-            p_claim_token: claimedBreak.claim_token,
+            break_event_id: breakEventId,
+            claim_token: claimedBreak.claim_token,
+            error_text: employeeDeliveryError,
           },
         );
-
-        if (result.error || result.data !== true) {
-          console.error("Could not record uncertain overdue email status");
+        if (markFailedError || markedFailed !== true) {
+          console.error("Could not record failed employee overdue email");
+          counts.skipped++;
+        } else {
+          counts.failed++;
         }
-      } catch {
-        console.error("Could not record uncertain overdue email status");
       }
     }
 

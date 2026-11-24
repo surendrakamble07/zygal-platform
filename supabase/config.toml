@@ -440,3 +440,8 @@ entrypoint = "./functions/send-feedback/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/send-break-ended/index.ts"
+
+[functions.send-break-start]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/send-break-start/index.ts"
