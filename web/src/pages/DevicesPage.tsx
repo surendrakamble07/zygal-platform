@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import JSZip from "jszip";
 import { supabase } from "../lib/supabase";
+import { useAuth } from "../auth/auth-context";
 import StatusBadge from "../components/StatusBadge";
 import Pagination from "../components/Pagination";
+import { TestDataBadge, TestDataFilter, TestDataToggle, type DummyFilter } from "../components/TestDataControls";
 
 const PAGE_SIZE = 25;
 
 interface DeviceRow {
   id: string;
+  is_dummy: boolean;
   site_id: string;
   sim_name: string | null;
   sim_number: string | null;
@@ -47,12 +50,29 @@ function SimPhoto({ src, name }: { src: string | null; name: string | null }) {
 }
 
 export default function DevicesPage() {
+  const { profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [dummyFilter, setDummyFilter] = useState<DummyFilter>("real");
+  const [actionError, setActionError] = useState("");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+
+  const toggleTestData = useMutation({
+    mutationFn: async ({ id, is_dummy }: { id: string; is_dummy: boolean }) => {
+      const { error } = await supabase.from("devices").update({ is_dummy }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setActionError("");
+      void queryClient.invalidateQueries({ queryKey: ["devices-all"] });
+    },
+    onError: (error: Error) => setActionError(error.message),
+  });
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -63,18 +83,19 @@ export default function DevicesPage() {
   }, [searchInput]);
 
   const devices = useQuery({
-    queryKey: ["devices-all", { page, search, status }],
+    queryKey: ["devices-all", { page, search, status, dummyFilter, isAdmin }],
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase
         .from("devices")
         .select(
-          "id, site_id, sim_name, sim_number, sim_photo_path, link_ip, link_mac_id, device_status, site:sites!inner ( branch_code, project:projects!sites_project_id_fkey ( name ) )",
+          "id, site_id, sim_name, sim_number, sim_photo_path, link_ip, link_mac_id, device_status, is_dummy, site:sites!inner ( branch_code, project:projects!sites_project_id_fkey ( name ) )",
           { count: "exact" },
         )
         .is("deleted_at", null);
 
       if (status) q = q.eq("device_status", status);
+      if (isAdmin && dummyFilter !== "all") q = q.eq("is_dummy", dummyFilter === "test");
       const clean = search.replace(/[,()*%\\"]/g, " ").trim();
       if (clean) q = q.ilike("site.branch_code", `*${clean}*`);
 
@@ -106,6 +127,7 @@ export default function DevicesPage() {
           link_ip: r.link_ip,
           link_mac_id: r.link_mac_id,
           device_status: r.device_status,
+          is_dummy: r.is_dummy,
           branch_code: site?.branch_code ?? "-",
           project_name: project?.name ?? "-",
         };
@@ -205,6 +227,7 @@ export default function DevicesPage() {
         To add a SIM card, open its site under Sites and use "Add SIM card" there.
       </p>
 
+      {actionError && <div className="banner error" role="alert">{actionError}</div>}
       <div className="filters">
         <input
           type="search"
@@ -223,6 +246,15 @@ export default function DevicesPage() {
           <option value="Active">Active</option>
           <option value="Replaced">Replaced</option>
         </select>
+        {isAdmin && (
+          <TestDataFilter
+            value={dummyFilter}
+            onChange={(value) => {
+              setDummyFilter(value);
+              setPage(0);
+            }}
+          />
+        )}
       </div>
 
       {devices.isError && (
@@ -253,7 +285,7 @@ export default function DevicesPage() {
               <SimPhoto src={sim.sim_photo_url} name={sim.sim_name} />
               <div className="sim-card-content">
                 <div className="sim-card-heading">
-                  <h3>{sim.sim_name || "Unnamed SIM"}</h3>
+                  <h3>{sim.sim_name || "Unnamed SIM"}{sim.is_dummy && <TestDataBadge />}</h3>
                   <StatusBadge status={sim.device_status} />
                 </div>
                 <p className="sim-card-number">{sim.sim_number || "No SIM number"}</p>
@@ -265,6 +297,14 @@ export default function DevicesPage() {
                   <div><dt>Link IP</dt><dd>{sim.link_ip || "-"}</dd></div>
                   <div><dt>MAC ID</dt><dd>{sim.link_mac_id || "-"}</dd></div>
                 </dl>
+                {isAdmin && (
+                  <TestDataToggle
+                    checked={sim.is_dummy}
+                    disabled={toggleTestData.isPending}
+                    itemName={`SIM ${sim.sim_name || sim.id}`}
+                    onChange={(is_dummy) => toggleTestData.mutate({ id: sim.id, is_dummy })}
+                  />
+                )}
               </div>
             </article>
           ))}

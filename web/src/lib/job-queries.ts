@@ -21,6 +21,7 @@ export interface JoinedJobDevice {
 export interface JoinedJob {
   id: string
   job_no: number
+  is_dummy: boolean
   job_date: string
   call_type: string
   handover_status: string
@@ -57,7 +58,7 @@ export function jobsSelect(options: JobsSelectOptions = {}): string {
     ? ''
     : ', devices ( sim_name, sim_number, link_ip, link_mac_id, vault_tam, cash_counter_tam, main_door_tam, ngl_main_door_tam, device_status, deleted_at, created_at )'
   const materials = options.includeMaterials === false ? '' : ', material_issues ( status )'
-  return `id, job_no, job_date, call_type, handover_status, final_status, remark, site:sites!inner (
+  return `id, job_no, is_dummy, job_date, call_type, handover_status, final_status, remark, site:sites!inner (
     id, project_id, branch_code, branch_name, state, latitude, longitude,
     project:projects!sites_project_id_fkey ( name ),
     project_type:project_types!sites_type_matches_project ( name )

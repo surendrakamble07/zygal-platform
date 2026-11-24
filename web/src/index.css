@@ -1279,6 +1279,38 @@ td.numeric {
   background: var(--neutral-bg);
   color: var(--neutral-text);
 }
+.test-data-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.25;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.test-data-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.test-data-toggle input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--zy-orange);
+}
 .empty-state {
   display: grid;
   justify-items: center;

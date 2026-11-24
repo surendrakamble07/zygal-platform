@@ -94,6 +94,8 @@ export function useJobReport(filters: ReportFilters, page: number, pageSize: num
           { count: 'exact' },
         )
         .is('deleted_at', null)
+        .eq('is_dummy', false)
+        .eq('site.is_dummy', false)
 
       if (filters.dateFrom) q = q.gte('job_date', filters.dateFrom)
       if (filters.dateTo) q = q.lte('job_date', filters.dateTo)
@@ -139,6 +141,8 @@ export async function fetchJobReportForExport(filters: ReportFilters): Promise<{
       includeEngineerInner: !!filters.vendor,
     }))
     .is('deleted_at', null)
+    .eq('is_dummy', false)
+    .eq('site.is_dummy', false)
 
   if (filters.dateFrom) q = q.gte('job_date', filters.dateFrom)
   if (filters.dateTo) q = q.lte('job_date', filters.dateTo)
@@ -169,6 +173,7 @@ export async function fetchJobReportForExport(filters: ReportFilters): Promise<{
         .in('site_id', siteIds)
         .eq('device_status', 'Active')
         .is('deleted_at', null)
+        .eq('is_dummy', false)
         .order('created_at', { ascending: false })
       : Promise.resolve({ data: [], error: null }),
     jobIds.length
@@ -250,11 +255,12 @@ export async function fetchMaterialReport(
     .from('material_issues')
     .select(
       `item, problem, quantity, status,
-       job:jobs!inner ( job_no, job_date,
-         site:sites!inner ( branch_code, state, project_id ) )`,
+       job:jobs!inner ( job_no, job_date, is_dummy,
+         site:sites!inner ( branch_code, state, project_id, is_dummy ) )`,
     )
 
   if (pendingOnly) q = q.eq('status', 'Pending')
+  q = q.eq('job.is_dummy', false).eq('job.site.is_dummy', false)
   if (filters.dateFrom) q = q.gte('job.job_date', filters.dateFrom)
   if (filters.dateTo) q = q.lte('job.job_date', filters.dateTo)
   if (filters.stateName) q = q.eq('job.site.state', filters.stateName)
@@ -295,8 +301,10 @@ export function useEngineerStats(dateFrom: string, dateTo: string) {
 export async function fetchEngineerStats(dateFrom: string, dateTo: string): Promise<EngineerStat[]> {
   let q = supabase
     .from('jobs')
-    .select('engineer_id, final_status, handover_status, engineer:engineers ( full_name )')
+    .select('engineer_id, final_status, handover_status, engineer:engineers ( full_name ), site:sites!inner ( is_dummy )')
     .is('deleted_at', null)
+    .eq('is_dummy', false)
+    .eq('site.is_dummy', false)
   if (dateFrom) q = q.gte('job_date', dateFrom)
   if (dateTo) q = q.lte('job_date', dateTo)
 
@@ -373,20 +381,25 @@ export async function fetchEmployeeProductivity(
 
       let jobsQuery = supabase
         .from('jobs')
-        .select('call_taken_by')
+        .select('call_taken_by, site:sites!inner ( is_dummy )')
         .is('deleted_at', null)
+        .eq('is_dummy', false)
+        .eq('site.is_dummy', false)
         .limit(20000)
       if (dateFrom) jobsQuery = jobsQuery.gte('job_date', dateFrom)
       if (dateTo) jobsQuery = jobsQuery.lte('job_date', dateTo)
       if (profileId) jobsQuery = jobsQuery.eq('call_taken_by', profileId)
 
       let profilesQuery = supabase.from('profiles').select('id, full_name, role, is_active').order('full_name')
+      profilesQuery = profilesQuery.eq('is_dummy', false)
       if (profileId) profilesQuery = profilesQuery.eq('id', profileId)
 
       let historyQuery = supabase
         .from('job_status_history')
-        .select('job_id, field_name, new_value, changed_by, changed_at')
+        .select('job_id, field_name, new_value, changed_by, changed_at, job:jobs!inner ( is_dummy, site:sites!inner ( is_dummy ) )')
         .eq('field_name', 'final_status')
+        .eq('job.is_dummy', false)
+        .eq('job.site.is_dummy', false)
         .order('changed_at', { ascending: false })
         .limit(20000)
       if (profileId) historyQuery = historyQuery.eq('changed_by', profileId)

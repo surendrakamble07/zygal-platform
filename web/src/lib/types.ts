@@ -25,4 +25,5 @@ export interface Site {
   latitude: number | null;
   longitude: number | null;
   status: "Active" | "Inactive";
+  is_dummy: boolean;
 }

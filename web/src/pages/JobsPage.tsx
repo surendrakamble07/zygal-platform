@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../auth/auth-context'
 import { jobsSelect, useCallTypes, useFinalStatuses, useHandoverStatuses, useVendorTypes, type JoinedJob } from '../lib/job-queries'
 import Icon from '../components/Icon'
 import Avatar from '../components/Avatar'
 import StatusBadge from '../components/StatusBadge'
+import { TestDataBadge, TestDataFilter, TestDataToggle, type DummyFilter } from '../components/TestDataControls'
 import Pagination from '../components/Pagination'
 import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 import JobForm from './JobForm'
@@ -15,6 +17,7 @@ const COLUMN_STORAGE_KEY = 'zygal-jobs-visible-columns'
 
 interface JobTableRow {
   id: string
+  is_dummy: boolean
   job_no: number
   job_date: string
   call_type: string
@@ -110,6 +113,7 @@ function toJobTableRow(row: JoinedJob): JobTableRow {
   const pendingMaterials = (row.material_issues ?? []).filter((issue) => issue.status === 'Pending').length
   return {
     id: row.id,
+    is_dummy: row.is_dummy,
     job_no: row.job_no,
     job_date: row.job_date,
     call_type: row.call_type,
@@ -139,6 +143,9 @@ function toJobTableRow(row: JoinedJob): JobTableRow {
 }
 
 export default function JobsPage() {
+  const { profile } = useAuth()
+  const isAdmin = profile?.role === 'admin'
+  const queryClient = useQueryClient()
   const callTypes = useCallTypes()
   const handoverStatuses = useHandoverStatuses()
   const finalStatuses = useFinalStatuses()
@@ -153,10 +160,24 @@ export default function JobsPage() {
   const [vendorType, setVendorType] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [dummyFilter, setDummyFilter] = useState<DummyFilter>('real')
+  const [actionError, setActionError] = useState('')
   const [adding, setAdding] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState<string[]>(initialVisibleColumns)
   const [columnPreferenceError, setColumnPreferenceError] = useState(false)
+
+  const toggleTestData = useMutation({
+    mutationFn: async ({ id, is_dummy }: { id: string; is_dummy: boolean }) => {
+      const { error } = await supabase.from('jobs').update({ is_dummy }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      setActionError('')
+      void queryClient.invalidateQueries({ queryKey: ['jobs'] })
+    },
+    onError: (error: Error) => setActionError(error.message),
+  })
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -167,7 +188,7 @@ export default function JobsPage() {
   }, [searchInput])
 
   const jobs = useQuery({
-    queryKey: ['jobs', { page, search, callType, handover, finalStatus, vendorType, dateFrom, dateTo }],
+    queryKey: ['jobs', { page, search, callType, handover, finalStatus, vendorType, dateFrom, dateTo, dummyFilter, isAdmin }],
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase
@@ -180,6 +201,7 @@ export default function JobsPage() {
       if (finalStatus) q = q.eq('final_status', finalStatus)
       if (dateFrom) q = q.gte('job_date', dateFrom)
       if (dateTo) q = q.lte('job_date', dateTo)
+      if (isAdmin && dummyFilter !== 'all') q = q.eq('is_dummy', dummyFilter === 'test')
       if (vendorType === 'In-house') q = q.is('engineer.vendor', null)
       else if (vendorType) q = q.ilike('engineer.vendor', vendorType)
 
@@ -255,6 +277,7 @@ export default function JobsPage() {
         {columnPreferenceError && (
           <div className="banner warn" role="status">Column choices could not be saved in this browser.</div>
         )}
+        {actionError && <div className="banner error" role="alert">{actionError}</div>}
 
         <div className="filters">
           <input
@@ -269,6 +292,15 @@ export default function JobsPage() {
               <option key={c.name} value={c.name}>{c.name}</option>
             ))}
           </select>
+          {isAdmin && (
+            <TestDataFilter
+              value={dummyFilter}
+              onChange={(value) => {
+                setDummyFilter(value)
+                setPage(0)
+              }}
+            />
+          )}
           <select value={handover} onChange={(e) => { setHandover(e.target.value); setPage(0) }}>
             <option value="">Any handover</option>
             {handoverStatuses.data?.map((h) => (
@@ -306,21 +338,39 @@ export default function JobsPage() {
               <tr>
                 <th>Job #</th>
                 {shownColumns.map((column) => <th key={column.id}>{column.label}</th>)}
+                {isAdmin && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {jobs.isLoading && <TableSkeleton columns={shownColumns.length + 1} />}
+              {jobs.isLoading && <TableSkeleton columns={shownColumns.length + 1 + Number(isAdmin)} />}
               {!jobs.isLoading && rows.length === 0 && (
                 <TableEmptyState
-                  columns={shownColumns.length + 1}
+                  columns={shownColumns.length + 1 + Number(isAdmin)}
                   message="No jobs match these filters."
                   action={<button onClick={() => setAdding(true)}><Icon name="plus" size={16} />Create a job</button>}
                 />
               )}
               {rows.map((job) => (
                 <tr key={job.id}>
-                  <td><Link className="icon-action table-link" aria-label={`View job ${job.job_no}`} to={`/jobs/${job.id}`}><Icon name="view" size={16} />#{job.job_no}</Link></td>
-                  {shownColumns.map((column) => <td key={column.id}>{column.render(job)}</td>)}
+                  <td>
+                    <Link className="icon-action table-link" aria-label={`View job ${job.job_no}`} to={`/jobs/${job.id}`}>
+                      <Icon name="view" size={16} />#{job.job_no}
+                    </Link>
+                    {job.is_dummy && <TestDataBadge />}
+                  </td>
+                  {shownColumns.map((column) => (
+                    <td key={column.id}>{column.render(job)}</td>
+                  ))}
+                  {isAdmin && (
+                    <td className="row-actions">
+                      <TestDataToggle
+                        checked={job.is_dummy}
+                        disabled={toggleTestData.isPending}
+                        itemName={`job ${job.job_no}`}
+                        onChange={(is_dummy) => toggleTestData.mutate({ id: job.id, is_dummy })}
+                      />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

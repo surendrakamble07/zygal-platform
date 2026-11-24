@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useProjects, useProjectTypes, useStates } from '../lib/queries'
@@ -7,6 +7,7 @@ import { useAuth } from '../auth/auth-context'
 import type { Site } from '../lib/types'
 import Icon from '../components/Icon'
 import StatusBadge from '../components/StatusBadge'
+import { TestDataBadge, TestDataFilter, TestDataToggle, type DummyFilter } from '../components/TestDataControls'
 import Pagination from '../components/Pagination'
 import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 import SiteForm from './SiteForm'
@@ -48,12 +49,26 @@ export default function SitesPage() {
   const [projectId, setProjectId] = useState('')
   const [stateName, setStateName] = useState('')
   const [status, setStatus] = useState('')
+  const [dummyFilter, setDummyFilter] = useState<DummyFilter>('real')
+  const [actionError, setActionError] = useState('')
   const [editing, setEditing] = useState<Site | null>(null)
   const [adding, setAdding] = useState(false)
   const [uploadingSites, setUploadingSites] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
   const siteUploadInput = useRef<HTMLInputElement>(null)
+
+  const toggleTestData = useMutation({
+    mutationFn: async ({ id, is_dummy }: { id: string; is_dummy: boolean }) => {
+      const { error } = await supabase.from('sites').update({ is_dummy }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      setActionError('')
+      void queryClient.invalidateQueries({ queryKey: ['sites'] })
+    },
+    onError: (error: Error) => setActionError(error.message),
+  })
 
   async function downloadSiteTemplate() {
     setUploadError('')
@@ -224,12 +239,12 @@ export default function SitesPage() {
   const typeName = useMemo(() => new Map((types.data ?? []).map((t) => [t.id, t.name])), [types.data])
 
   const sites = useQuery({
-    queryKey: ['sites', { page, search, projectId, stateName, status }],
+    queryKey: ['sites', { page, search, projectId, stateName, status, dummyFilter, isAdmin }],
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase
         .from('sites')
-        .select('id, project_id, project_type_id, branch_code, branch_name, state, latitude, longitude, status', {
+        .select('id, project_id, project_type_id, branch_code, branch_name, state, latitude, longitude, status, is_dummy', {
           count: 'exact',
         })
         .is('deleted_at', null)
@@ -239,6 +254,7 @@ export default function SitesPage() {
       if (projectId) q = q.eq('project_id', projectId)
       if (stateName) q = q.eq('state', stateName)
       if (status) q = q.eq('status', status)
+      if (isAdmin && dummyFilter !== 'all') q = q.eq('is_dummy', dummyFilter === 'test')
 
       const from = page * PAGE_SIZE
       const { data, count, error } = await q.order('branch_code').range(from, from + PAGE_SIZE - 1)
@@ -352,8 +368,18 @@ export default function SitesPage() {
             <option value="Active">Active</option>
             <option value="Inactive">Inactive</option>
           </select>
+          {isAdmin && (
+            <TestDataFilter
+              value={dummyFilter}
+              onChange={(value) => {
+                setDummyFilter(value)
+                setPage(0)
+              }}
+            />
+          )}
         </div>
 
+        {actionError && <div className="banner error" role="alert">{actionError}</div>}
         {sites.isError && <div className="banner error">Could not load sites. Please refresh and try again.</div>}
 
         <div className="table-wrap">
@@ -381,7 +407,7 @@ export default function SitesPage() {
               )}
               {rows.map((s) => (
                 <tr key={s.id}>
-                  <td><Link to={`/sites/${s.id}`}>{s.branch_code}</Link></td>
+                  <td><Link to={`/sites/${s.id}`}>{s.branch_code}</Link>{s.is_dummy && <TestDataBadge />}</td>
                   <td>{s.branch_name ?? '-'}</td>
                   <td>{projectName.get(s.project_id) ?? '-'}</td>
                   <td>{s.project_type_id ? typeName.get(s.project_type_id) ?? '-' : '-'}</td>
@@ -393,6 +419,14 @@ export default function SitesPage() {
                       <Icon name="edit" size={16} />
                       Edit
                     </button>
+                    {isAdmin && (
+                      <TestDataToggle
+                        checked={s.is_dummy}
+                        disabled={toggleTestData.isPending}
+                        itemName={s.branch_code}
+                        onChange={(is_dummy) => toggleTestData.mutate({ id: s.id, is_dummy })}
+                      />
+                    )}
                   </td>
                 </tr>
               ))}

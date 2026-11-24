@@ -7,6 +7,7 @@ import type { EmployeeRow, Role } from '../lib/user-types'
 import Icon from '../components/Icon'
 import Avatar from '../components/Avatar'
 import StatusBadge from '../components/StatusBadge'
+import { TestDataBadge, TestDataFilter, TestDataToggle, type DummyFilter } from '../components/TestDataControls'
 import Pagination from '../components/Pagination'
 import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 import UserForm from './UserForm'
@@ -105,6 +106,7 @@ export default function UsersPage() {
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [dummyFilter, setDummyFilter] = useState<DummyFilter>('real')
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<EmployeeRow | null>(null)
   const [actionError, setActionError] = useState('')
@@ -118,17 +120,18 @@ export default function UsersPage() {
   }, [searchInput])
 
   const employees = useQuery({
-    queryKey: ['employees', { page, search, roleFilter, statusFilter }],
+    queryKey: ['employees', { page, search, roleFilter, statusFilter, dummyFilter, isAdmin }],
     placeholderData: keepPreviousData,
     queryFn: async () => {
       let q = supabase
         .from('profiles')
-        .select('id, full_name, email, phone, role, job_title, is_active, created_at', { count: 'exact' })
+        .select('id, full_name, email, phone, role, job_title, is_active, is_dummy, created_at', { count: 'exact' })
 
       const clean = search.replace(/[,()*%\\"]/g, ' ').trim()
       if (clean) q = q.or(`full_name.ilike.*${clean}*,email.ilike.*${clean}*`)
       if (roleFilter) q = q.eq('role', roleFilter)
       if (statusFilter) q = q.eq('is_active', statusFilter === 'active')
+      if (isAdmin && dummyFilter !== 'all') q = q.eq('is_dummy', dummyFilter === 'test')
 
       const from = page * PAGE_SIZE
       const { data, count, error } = await q.order('full_name').range(from, from + PAGE_SIZE - 1)
@@ -138,12 +141,14 @@ export default function UsersPage() {
   })
 
   const activeEmployeeCount = useQuery({
-    queryKey: ['active-employee-count'],
+    queryKey: ['active-employee-count', isAdmin],
     queryFn: async () => {
-      const { count, error } = await supabase
+      let q = supabase
         .from('profiles')
         .select('id', { count: 'exact', head: true })
         .eq('is_active', true)
+      if (isAdmin) q = q.eq('is_dummy', false)
+      const { count, error } = await q
       if (error) throw error
       return count
     },
@@ -156,6 +161,19 @@ export default function UsersPage() {
       void qc.invalidateQueries({ queryKey: ['employees'] })
     },
     onError: (err: Error) => setActionError(err.message),
+  })
+
+  const toggleTestData = useMutation({
+    mutationFn: async ({ id, is_dummy }: { id: string; is_dummy: boolean }) => {
+      const { error } = await supabase.from('profiles').update({ is_dummy }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      setActionError('')
+      void qc.invalidateQueries({ queryKey: ['employees'] })
+      void qc.invalidateQueries({ queryKey: ['active-employee-count'] })
+    },
+    onError: (error: Error) => setActionError(error.message),
   })
 
   const rows = employees.data?.rows ?? []
@@ -199,6 +217,15 @@ export default function UsersPage() {
             <option value="admin">Admin</option>
             <option value="other">Limited</option>
           </select>
+          {isAdmin && (
+            <TestDataFilter
+              value={dummyFilter}
+              onChange={(value) => {
+                setDummyFilter(value)
+                setPage(0)
+              }}
+            />
+          )}
           <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(0) }}>
             <option value="">Any status</option>
             <option value="active">Active</option>
@@ -229,7 +256,7 @@ export default function UsersPage() {
               )}
               {rows.map((u) => (
                 <tr key={u.id}>
-                  <td><span className="person-cell"><Avatar name={u.full_name} />{u.full_name}</span></td>
+                  <td><span className="person-cell"><Avatar name={u.full_name} />{u.full_name}{u.is_dummy && <TestDataBadge />}</span></td>
                   <td>{u.email}</td>
                   <td>{u.phone ?? '-'}</td>
                   <td>{ROLE_LABEL[u.role]}</td>
@@ -246,6 +273,12 @@ export default function UsersPage() {
                         >
                           {u.is_active ? 'Deactivate' : 'Activate'}
                         </button>
+                        <TestDataToggle
+                          checked={u.is_dummy}
+                          disabled={toggleTestData.isPending}
+                          itemName={u.full_name}
+                          onChange={(is_dummy) => toggleTestData.mutate({ id: u.id, is_dummy })}
+                        />
                       </>
                     )}
                   </td>

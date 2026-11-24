@@ -64,34 +64,53 @@ export function useDashboardStats(range: { start: string; end: string }) {
     queryFn: async (): Promise<DashboardStats> => {
       const [sitesTotal, sitesActive, jobsThisMonth, pendingHandover, pendingMaterial, completed, statusBreakdown, recent] =
         await Promise.all([
-          supabase.from('sites').select('id', { count: 'exact', head: true }).is('deleted_at', null),
-          supabase.from('sites').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('status', 'Active'),
+          supabase.from('sites').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('is_dummy', false),
+          supabase.from('sites').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('is_dummy', false).eq('status', 'Active'),
           supabase
             .from('jobs')
-            .select('id', { count: 'exact', head: true })
+            .select('id, site:sites!inner ( is_dummy )', { count: 'exact', head: true })
             .is('deleted_at', null)
+            .eq('is_dummy', false)
+            .eq('site.is_dummy', false)
             .gte('job_date', range.start)
             .lt('job_date', range.end),
-          supabase.from('jobs').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('handover_status', 'Pending'),
-          supabase.from('material_issues').select('id', { count: 'exact', head: true }).eq('status', 'Pending'),
           supabase
             .from('jobs')
-            .select('id', { count: 'exact', head: true })
+            .select('id, site:sites!inner ( is_dummy )', { count: 'exact', head: true })
             .is('deleted_at', null)
+            .eq('is_dummy', false)
+            .eq('site.is_dummy', false)
+            .eq('handover_status', 'Pending'),
+          supabase
+            .from('material_issues')
+            .select('id, job:jobs!inner ( is_dummy, site:sites!inner ( is_dummy ) )', { count: 'exact', head: true })
+            .eq('status', 'Pending')
+            .eq('job.is_dummy', false)
+            .eq('job.site.is_dummy', false),
+          supabase
+            .from('jobs')
+            .select('id, site:sites!inner ( is_dummy )', { count: 'exact', head: true })
+            .is('deleted_at', null)
+            .eq('is_dummy', false)
+            .eq('site.is_dummy', false)
             .gte('job_date', range.start)
             .lt('job_date', range.end)
             .in('final_status', ['Completed', 'Live']),
           supabase
             .from('jobs')
-            .select('final_status')
+            .select('final_status, site:sites!inner ( is_dummy )')
             .is('deleted_at', null)
+            .eq('is_dummy', false)
+            .eq('site.is_dummy', false)
             .gte('job_date', range.start)
             .lt('job_date', range.end)
             .limit(5000),
           supabase
             .from('jobs')
-            .select('id, job_no, job_date, final_status, handover_status, site:sites ( branch_code )')
+            .select('id, job_no, job_date, final_status, handover_status, site:sites!inner ( branch_code, is_dummy )')
             .is('deleted_at', null)
+            .eq('is_dummy', false)
+            .eq('site.is_dummy', false)
             .order('job_date', { ascending: false })
             .order('job_no', { ascending: false })
             .limit(8),

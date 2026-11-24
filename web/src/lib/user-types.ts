@@ -8,6 +8,7 @@ export interface EmployeeRow {
   role: Role
   job_title: string | null
   is_active: boolean
+  is_dummy: boolean
   created_at: string
   allowed_pages?: string[] | null
 }
