@@ -16,8 +16,14 @@ import { useDevicesForSite } from "../lib/device-queries";
 import { useProjectTypes } from "../lib/queries";
 import { friendlyJobError } from "../lib/job-errors";
 import { coordinatesFromMapLink } from "../lib/site-location";
+import {
+  EMPTY_JOB_TESTING_VALUES,
+  jobTestingValuesForSave,
+  type JobTestingValues,
+} from "../lib/job-testing";
 import type { Device } from "../lib/device-types";
 import type { Job } from "../lib/job-types";
+import JobTestingFields from "../components/JobTestingFields";
 
 interface Props {
   job: Job | null;
@@ -187,6 +193,9 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
   const [uploadingSimPhoto, setUploadingSimPhoto] = useState(false);
   const simPhotoInputRef = useRef<HTMLInputElement>(null);
   const [materialDrafts, setMaterialDrafts] = useState<MaterialDraft[]>([]);
+  const [testingValues, setTestingValues] = useState<JobTestingValues>(() => ({
+    ...EMPTY_JOB_TESTING_VALUES,
+  }));
   const [error, setError] = useState("");
   const [persistedJobId, setPersistedJobId] = useState<string | null>(null);
   const showMaterialIssueBlock =
@@ -420,9 +429,6 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
         throw new Error(
           "Wait for the selected site's details to finish loading.",
         );
-      if (siteDetails.data.project_type_id === null && !siteValues.projectTypeId) {
-        throw new JobFormValidationError("Choose a project type for this site.");
-      }
       const lat = coordinateValue(siteValues.latitude);
       const lng = coordinateValue(siteValues.longitude);
       if (Number.isNaN(lat) || Number.isNaN(lng)) {
@@ -548,28 +554,26 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
       }
 
       const currentSite = siteDetails.data;
-      if (currentSite.project_type_id === null) {
-        const sitePatch = {
-          project_type_id: siteValues.projectTypeId,
-          latitude: lat,
-          longitude: lng,
-          status: siteValues.status,
-        };
-        if (
-          currentSite.project_type_id !== sitePatch.project_type_id ||
-          currentSite.latitude !== sitePatch.latitude ||
-          currentSite.longitude !== sitePatch.longitude ||
-          currentSite.status !== sitePatch.status
-        ) {
-          const { error: siteError } = await supabase
-            .from("sites")
-            .update(sitePatch)
-            .eq("id", siteId);
-          if (siteError) {
-            throw new JobFormValidationError(
-              `Could not save site details: ${siteError.message}`,
-            );
-          }
+      const sitePatch = {
+        project_type_id: siteValues.projectTypeId || null,
+        latitude: lat,
+        longitude: lng,
+        status: siteValues.status,
+      };
+      if (
+        currentSite.project_type_id !== sitePatch.project_type_id ||
+        currentSite.latitude !== sitePatch.latitude ||
+        currentSite.longitude !== sitePatch.longitude ||
+        currentSite.status !== sitePatch.status
+      ) {
+        const { error: siteError } = await supabase
+          .from("sites")
+          .update(sitePatch)
+          .eq("id", siteId);
+        if (siteError) {
+          throw new JobFormValidationError(
+            `Could not save site details: ${siteError.message}`,
+          );
         }
       }
 
@@ -610,6 +614,25 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
       }
 
       if (!savedJobId) throw new Error("The job could not be saved.");
+
+      if (!job) {
+        const { error: testingError } = await supabase
+          .from("job_testing_details")
+          .upsert(
+            {
+              job_id: savedJobId,
+              ...jobTestingValuesForSave(testingValues),
+              updated_by: profile?.id ?? null,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "job_id" },
+          );
+        if (testingError) {
+          throw new Error(
+            "Job saved, but testing details could not be saved. Please retry.",
+          );
+        }
+      }
 
       const shouldSaveDevice =
         !!existingDeviceId ||
@@ -761,8 +784,6 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
       );
     if (!siteValues?.projectId)
       return setError("Choose a project for this site.");
-    if (!siteValues.projectTypeId)
-      return setError("Choose a project type for this site.");
     if (!callTakenBy) return setError("Choose who took the call.");
     if (!finalStatus) return setError("Choose a final status.");
     if (
@@ -989,19 +1010,18 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                 <span className="skeleton-bar" />
               </div>
             )}
-            {siteReady && loadedSite?.project_type_id === null && (
-              <fieldset className="form-section">
-                <legend>
+            {siteReady && (
+              <details className="form-section collapsible-form-section">
+                <summary>
                   Site details{" "}
-                  <span className="field-optional">complete this site record</span>
-                </legend>
+                  <span className="field-optional">Optional — view or update this site</span>
+                </summary>
                 <div className="grid-form">
                   <label>
                     <span className="field-caption">
-                      Project type <span className="field-required">*</span>
+                      Project type <span className="field-optional">Optional</span>
                     </span>
                     <select
-                      aria-required="true"
                       value={siteValues?.projectTypeId ?? ""}
                       onChange={(e) =>
                         updateSiteDraft({ projectTypeId: e.target.value })
@@ -1082,7 +1102,21 @@ export default function JobForm({ job, onClose, onSaved }: Props) {
                     />
                   </label>
                 </div>
-              </fieldset>
+              </details>
+            )}
+
+            {!job && (
+              <details className="form-section collapsible-form-section">
+                <summary>
+                  Testing <span className="field-optional">Optional</span>
+                </summary>
+                <JobTestingFields
+                  values={testingValues}
+                  onChange={(patch) =>
+                    setTestingValues((current) => ({ ...current, ...patch }))
+                  }
+                />
+              </details>
             )}
 
             <fieldset className="form-section">

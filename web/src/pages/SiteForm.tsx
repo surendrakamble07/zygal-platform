@@ -158,30 +158,30 @@ export default function SiteForm({ site, onClose }: Props) {
 
     const code = branchCode.trim()
     if (!projectId) return setError('Choose a project.')
-    if (!typeId) return setError('Choose a project type.')
+    if (site && !typeId) return setError('Choose a project type.')
     if (!code) return setError('Enter the Branch Code.')
     if (!stateName) return setError('Choose a state.')
 
-    const latitude = parseCoord(lat)
-    const longitude = parseCoord(lng)
-    if (Number.isNaN(latitude) || Number.isNaN(longitude)) return setError('Latitude and longitude must be numbers.')
-    if ((latitude === null) !== (longitude === null)) return setError('Enter both latitude and longitude, or leave both empty.')
-    if (latitude !== null && (latitude < 6 || latitude > 38)) return setError('Latitude must be between 6 and 38 (India).')
-    if (longitude !== null && (longitude < 68 || longitude > 98)) return setError('Longitude must be between 68 and 98 (India).')
+    const latitude = site ? parseCoord(lat) : null
+    const longitude = site ? parseCoord(lng) : null
+    if (site && (Number.isNaN(latitude) || Number.isNaN(longitude))) return setError('Latitude and longitude must be numbers.')
+    if (site && (latitude === null) !== (longitude === null)) return setError('Enter both latitude and longitude, or leave both empty.')
+    if (site && latitude !== null && (latitude < 6 || latitude > 38)) return setError('Latitude must be between 6 and 38 (India).')
+    if (site && longitude !== null && (longitude < 68 || longitude > 98)) return setError('Longitude must be between 68 and 98 (India).')
 
     save.mutate({
       project_id: projectId,
-      project_type_id: typeId,
+      project_type_id: site ? typeId : null,
       branch_code: code,
       branch_name: branchName.trim() || null,
       state: stateName,
       latitude,
       longitude,
-      status,
+      status: site ? status : 'Active',
     })
   }
 
-  const loading = projects.isLoading || types.isLoading || states.isLoading
+  const loading = projects.isLoading || states.isLoading || (!!site && types.isLoading)
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -214,17 +214,19 @@ export default function SiteForm({ site, onClose }: Props) {
               </select>
             </label>
 
-            <label>
-              <span className="field-caption">Project type <span className="field-required">*</span></span>
-              <select aria-required="true" value={typeId} onChange={(e) => setTypeId(e.target.value)} disabled={!projectId}>
-                <option value="">{projectId ? 'Select type' : 'Choose a project first'}</option>
-                {typeOptions.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {site && (
+              <label>
+                <span className="field-caption">Project type <span className="field-required">*</span></span>
+                <select aria-required="true" value={typeId} onChange={(e) => setTypeId(e.target.value)} disabled={!projectId}>
+                  <option value="">{projectId ? 'Select type' : 'Choose a project first'}</option>
+                  {typeOptions.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             <label>
               <span className="field-caption">Branch code <span className="field-required">*</span></span>
@@ -236,7 +238,8 @@ export default function SiteForm({ site, onClose }: Props) {
               <input value={branchName} onChange={(e) => setBranchName(e.target.value)} maxLength={120} />
             </label>
 
-            <div className="full">
+            {site && (
+              <div className="full">
               <label htmlFor="site-map-link">
                 <span className="field-caption">Google Maps link <span className="field-optional">Optional</span></span>
                 <input
@@ -271,6 +274,7 @@ export default function SiteForm({ site, onClose }: Props) {
                 )}
               </div>
             </div>
+            )}
 
             <label>
               <span className="field-caption">State <span className="field-required">*</span></span>
@@ -284,23 +288,23 @@ export default function SiteForm({ site, onClose }: Props) {
               </select>
             </label>
 
-            <label>
+            {site && <label>
               <span className="field-caption">Status <span className="field-required">*</span></span>
               <select value={status} onChange={(e) => setStatus(e.target.value as 'Active' | 'Inactive')}>
                 <option value="Active">Active</option>
                 <option value="Inactive">Inactive</option>
               </select>
-            </label>
+            </label>}
 
-            <label>
+            {site && <label>
               <span className="field-caption">Latitude <span className="field-optional">Optional</span></span>
               <input inputMode="decimal" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="22.483586" />
-            </label>
+            </label>}
 
-            <label>
+            {site && <label>
               <span className="field-caption">Longitude <span className="field-optional">Optional</span></span>
               <input inputMode="decimal" value={lng} onChange={(e) => setLng(e.target.value)} placeholder="72.801502" />
-            </label>
+            </label>}
 
             {error && <div className="banner error full form-error" role="alert">{error}</div>}
 

@@ -11,10 +11,18 @@ import {
   useMaterialProblems,
 } from "../lib/job-queries";
 import { friendlyJobError } from "../lib/job-errors";
+import {
+  EMPTY_JOB_TESTING_VALUES,
+  jobTestingValuesForSave,
+  jobTestingValuesFromRow,
+  type JobTestingValues,
+} from "../lib/job-testing";
 import type { ChecklistLine, Job, MaterialLine } from "../lib/job-types";
+import { useAuth } from "../auth/auth-context";
 import Icon from "../components/Icon";
 import StatusBadge from "../components/StatusBadge";
 import { TableEmptyState, TableSkeleton } from "../components/TableStates";
+import JobTestingFields from "../components/JobTestingFields";
 import JobForm from "./JobForm";
 
 function useJob(jobId: string | undefined) {
@@ -77,6 +85,7 @@ export default function JobDetail() {
   const { jobId } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { profile } = useAuth();
   const job = useJob(jobId);
   const names = useNames(job.data);
 
@@ -89,6 +98,12 @@ export default function JobDetail() {
 
   const [editing, setEditing] = useState(false);
   const [statusError, setStatusError] = useState("");
+  const [testingDraft, setTestingDraft] = useState<{
+    jobId: string;
+    values: JobTestingValues;
+  } | null>(null);
+  const [testingError, setTestingError] = useState("");
+  const [testingSaved, setTestingSaved] = useState(false);
 
   const checklist = useQuery({
     queryKey: ["job-checklist", jobId],
@@ -115,6 +130,52 @@ export default function JobDetail() {
         .order("status", { ascending: false });
       if (error) throw error;
       return (data ?? []) as MaterialLine[];
+    },
+  });
+
+  const testing = useQuery({
+    queryKey: ["job-testing-details", jobId],
+    enabled: !!jobId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("job_testing_details")
+        .select(
+          "link_plotted, arm_disarm_schedule, nvr_count, ipc_camera_count, intrusion_panel, asset_tracker, jio_tag, jio_tag_testing, em_panel, ai_applied, other_devices, broadband_active, backend_filled, fr_testing, ip_panel_testing",
+        )
+        .eq("job_id", jobId)
+        .maybeSingle();
+      if (error) throw error;
+      return data as Partial<JobTestingValues> | null;
+    },
+  });
+
+  const testingValues =
+    testingDraft && testingDraft.jobId === jobId
+      ? testingDraft.values
+      : jobTestingValuesFromRow(testing.data ?? EMPTY_JOB_TESTING_VALUES);
+
+  const saveTesting = useMutation({
+    mutationFn: async () => {
+      if (!jobId) throw new Error("The job could not be identified.");
+      const { error } = await supabase.from("job_testing_details").upsert(
+        {
+          job_id: jobId,
+          ...jobTestingValuesForSave(testingValues),
+          updated_by: profile?.id ?? null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "job_id" },
+      );
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setTestingError("");
+      setTestingSaved(true);
+      void qc.invalidateQueries({ queryKey: ["job-testing-details", jobId] });
+    },
+    onError: (err) => {
+      setTestingSaved(false);
+      setTestingError(friendlyJobError(err));
     },
   });
 
@@ -418,6 +479,60 @@ export default function JobDetail() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="card">
+        <details className="form-section collapsible-form-section">
+          <summary>
+            Testing <span className="field-optional">Optional</span>
+          </summary>
+          {testing.isLoading ? (
+            <div className="form-loading">
+              <span className="skeleton-bar" />
+              <span className="skeleton-bar" />
+            </div>
+          ) : testing.isError ? (
+            <div className="banner error" role="alert">
+              Could not load testing details. Please reload the job and try again.
+            </div>
+          ) : (
+            <form
+              className="job-entry-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                setTestingError("");
+                setTestingSaved(false);
+                saveTesting.mutate();
+              }}
+            >
+              <JobTestingFields
+                values={testingValues}
+                onChange={(patch) => {
+                  setTestingDraft({
+                    jobId: jobId ?? "",
+                    values: { ...testingValues, ...patch },
+                  });
+                  setTestingSaved(false);
+                }}
+              />
+              {testingError && (
+                <div className="banner error" role="alert">
+                  {testingError}
+                </div>
+              )}
+              {testingSaved && (
+                <div className="hint ok" role="status">
+                  Testing details saved.
+                </div>
+              )}
+              <div className="actions">
+                <button type="submit" disabled={saveTesting.isPending}>
+                  {saveTesting.isPending ? "Saving..." : "Save testing details"}
+                </button>
+              </div>
+            </form>
+          )}
+        </details>
       </section>
 
       <section className="card">

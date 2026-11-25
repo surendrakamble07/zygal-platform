@@ -1432,6 +1432,14 @@ textarea:focus-visible {
   font-weight: 800;
   color: var(--text);
 }
+.collapsible-form-section > summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--text);
+}
+.collapsible-form-section > summary::marker {
+  color: var(--muted);
+}
 .rule-preview {
   display: flex;
   flex-direction: column;
