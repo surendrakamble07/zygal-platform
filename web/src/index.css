@@ -667,6 +667,39 @@ a.link:hover {
   background: var(--warn-bg);
   color: var(--warning-text);
 }
+.availability-indicator {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.availability-indicator.free {
+  border-color: color-mix(in srgb, var(--zy-green) 28%, var(--border));
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+.availability-indicator.busy {
+  border-color: color-mix(in srgb, var(--zy-blue) 28%, var(--border));
+  background: var(--progress-bg);
+  color: var(--progress-text);
+}
+.availability-indicator.stale {
+  border-color: color-mix(in srgb, var(--zy-orange) 48%, var(--border));
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+.availability-remark {
+  display: block;
+  max-width: 280px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
 .break-error {
   position: fixed;
   top: 76px;
@@ -1032,6 +1065,82 @@ svg.topbar-action-icon {
   border-radius: 14px;
   background: var(--card);
   scrollbar-color: color-mix(in srgb, var(--muted) 55%, transparent) transparent;
+}
+.site-import-preview {
+  margin-top: 16px;
+}
+.site-import-file-name {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.site-import-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+.site-import-metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--card);
+}
+.site-import-metric strong {
+  color: var(--text);
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+.site-import-metric span,
+.site-import-candidates {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.site-import-issues {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--hover);
+}
+.site-import-issues summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.site-import-issues ul {
+  max-height: 220px;
+  margin-bottom: 0;
+  overflow: auto;
+}
+.site-import-table-wrap {
+  max-height: 60vh;
+  overflow: auto;
+}
+.site-import-table-wrap table {
+  min-width: 850px;
+}
+.site-import-candidates {
+  display: block;
+  margin-top: 4px;
+}
+.site-import-original-state {
+  white-space: pre-wrap;
+}
+.site-import-duplicate-badge {
+  margin-top: 4px;
+}
+.site-import-review-actions {
+  display: flex;
+  min-width: 220px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.site-import-review-actions select {
+  min-width: 160px;
+  max-width: 220px;
 }
 .sim-card-grid {
   display: grid;

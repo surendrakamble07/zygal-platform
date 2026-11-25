@@ -10,6 +10,7 @@ import StatusBadge from '../components/StatusBadge'
 import { TestDataBadge, TestDataFilter, TestDataToggle, type DummyFilter } from '../components/TestDataControls'
 import Pagination from '../components/Pagination'
 import { TableEmptyState, TableSkeleton } from '../components/TableStates'
+import type { JobTestingValues } from '../lib/job-testing'
 import JobForm from './JobForm'
 
 const PAGE_SIZE = 25
@@ -43,7 +44,26 @@ interface JobTableRow {
   handoverStatus: string
   pendingMaterials: number
   finalStatus: string
+  linkPlotted: string | null
+  armDisarmSchedule: string | null
+  nvrCount: string | null
+  ipcCameraCount: string | null
+  intrusionPanel: string | null
+  assetTracker: string | null
+  jioTag: string | null
+  jioTagTesting: string | null
+  emPanel: string | null
+  aiApplied: string | null
+  otherDevices: string | null
+  broadbandActive: string | null
+  backendFilled: string | null
+  frTesting: string | null
+  ipPanelTesting: string | null
 }
+
+type JobTestingRow = { job_id: string } & Partial<
+  Record<keyof JobTestingValues, string | null>
+>
 
 interface JobColumn {
   id: string
@@ -89,6 +109,21 @@ const COLUMNS: JobColumn[] = [
     render: (j) => j.pendingMaterials > 0 ? <StatusBadge status={`${j.pendingMaterials} pending`} /> : '-',
   },
   { id: 'finalStatus', label: 'Final Status', defaultVisible: true, render: (j) => <StatusBadge status={j.finalStatus} /> },
+  { id: 'linkPlotted', label: 'Link Plotted', render: (j) => j.linkPlotted || '-' },
+  { id: 'armDisarmSchedule', label: 'ARM-DISARM Schedule', render: (j) => j.armDisarmSchedule || '-' },
+  { id: 'nvrCount', label: 'NVR', render: (j) => j.nvrCount || '-' },
+  { id: 'ipcCameraCount', label: 'IPC Vault Room Cameras', render: (j) => j.ipcCameraCount || '-' },
+  { id: 'intrusionPanel', label: 'Intrusion Panel', render: (j) => j.intrusionPanel || '-' },
+  { id: 'assetTracker', label: 'Asset Tracker', render: (j) => j.assetTracker || '-' },
+  { id: 'jioTag', label: 'Jio Tag', render: (j) => j.jioTag || '-' },
+  { id: 'jioTagTesting', label: 'Jio Tag Testing', render: (j) => j.jioTagTesting || '-' },
+  { id: 'emPanel', label: 'EM Panel', render: (j) => j.emPanel || '-' },
+  { id: 'aiApplied', label: 'AI Applied', render: (j) => j.aiApplied || '-' },
+  { id: 'otherDevices', label: 'Other Devices', render: (j) => j.otherDevices || '-' },
+  { id: 'broadbandActive', label: 'Broadband Active', render: (j) => j.broadbandActive || '-' },
+  { id: 'backendFilled', label: 'Backend Filled', render: (j) => j.backendFilled || '-' },
+  { id: 'frTesting', label: 'FR Testing', render: (j) => j.frTesting || '-' },
+  { id: 'ipPanelTesting', label: 'IP Panel Testing', render: (j) => j.ipPanelTesting || '-' },
 ]
 
 const DEFAULT_VISIBLE_COLUMNS = COLUMNS.filter((column) => column.defaultVisible).map((column) => column.id)
@@ -104,7 +139,10 @@ function initialVisibleColumns(): string[] {
   }
 }
 
-function toJobTableRow(row: JoinedJob): JobTableRow {
+function toJobTableRow(
+  row: JoinedJob,
+  testing: JobTestingRow | undefined,
+): JobTableRow {
   const site = row.site
   const activeDevices = (site?.devices ?? []).filter(
     (device) => device.device_status === 'Active' && device.deleted_at === null,
@@ -139,6 +177,21 @@ function toJobTableRow(row: JoinedJob): JobTableRow {
     handoverStatus: row.handover_status,
     pendingMaterials,
     finalStatus: row.final_status,
+    linkPlotted: testing?.link_plotted ?? null,
+    armDisarmSchedule: testing?.arm_disarm_schedule ?? null,
+    nvrCount: testing?.nvr_count ?? null,
+    ipcCameraCount: testing?.ipc_camera_count ?? null,
+    intrusionPanel: testing?.intrusion_panel ?? null,
+    assetTracker: testing?.asset_tracker ?? null,
+    jioTag: testing?.jio_tag ?? null,
+    jioTagTesting: testing?.jio_tag_testing ?? null,
+    emPanel: testing?.em_panel ?? null,
+    aiApplied: testing?.ai_applied ?? null,
+    otherDevices: testing?.other_devices ?? null,
+    broadbandActive: testing?.broadband_active ?? null,
+    backendFilled: testing?.backend_filled ?? null,
+    frTesting: testing?.fr_testing ?? null,
+    ipPanelTesting: testing?.ip_panel_testing ?? null,
   }
 }
 
@@ -217,7 +270,25 @@ export default function JobsPage() {
         .range(from, from + PAGE_SIZE - 1)
       if (error) throw error
 
-      const rows = ((data ?? []) as unknown as JoinedJob[]).map(toJobTableRow)
+      const jobsForPage = (data ?? []) as unknown as JoinedJob[]
+      const testingByJob = new Map<string, JobTestingRow>()
+      const jobIds = jobsForPage.map((row) => row.id)
+      if (jobIds.length > 0) {
+        const { data: testingRows, error: testingError } = await supabase
+          .from('job_testing_details')
+          .select(
+            'job_id, link_plotted, arm_disarm_schedule, nvr_count, ipc_camera_count, intrusion_panel, asset_tracker, jio_tag, jio_tag_testing, em_panel, ai_applied, other_devices, broadband_active, backend_filled, fr_testing, ip_panel_testing',
+          )
+          .in('job_id', jobIds)
+        if (testingError) throw testingError
+        for (const testingRow of (testingRows ?? []) as unknown as JobTestingRow[]) {
+          testingByJob.set(testingRow.job_id, testingRow)
+        }
+      }
+
+      const rows = jobsForPage.map((row) =>
+        toJobTableRow(row, testingByJob.get(row.id)),
+      )
       return { rows, total: count ?? 0 }
     },
   })

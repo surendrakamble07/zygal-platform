@@ -10,29 +10,80 @@ import StatusBadge from '../components/StatusBadge'
 import { TestDataBadge, TestDataFilter, TestDataToggle, type DummyFilter } from '../components/TestDataControls'
 import Pagination from '../components/Pagination'
 import { TableEmptyState, TableSkeleton } from '../components/TableStates'
+import SiteImportPreview, {
+  type SiteImportIssue,
+  type SiteImportPreviewRow,
+  type SiteImportResult,
+} from '../components/SiteImportPreview'
+import { matchReference } from '../lib/import/referenceMatcher.ts'
+import {
+  isSiteImportRowImportable,
+  resolveSiteImportState,
+} from '../lib/import/resolveSiteImportState.ts'
+import { STATE_ALIASES } from '../lib/import/stateAliases.ts'
 import SiteForm from './SiteForm'
 
 const PAGE_SIZE = 25
 const MAX_UPLOAD_BYTES = 55 * 1024 * 1024
 const REQUIRED_SITE_HEADERS = ['Project Name', 'Branch Code', 'Branch Name', 'State'] as const
 
-interface ImportIssue {
-  row: number
-  reason: string
+interface SiteImportRow extends SiteImportPreviewRow {
+  projectId: string
+  branchName: string
 }
 
-interface ImportSummary {
-  created: number
-  skipped: number
-  issues: ImportIssue[]
+interface SiteImportPreviewData {
+  fileName: string
+  totalRows: number
+  validRows: number
+  rows: SiteImportRow[]
+  issues: SiteImportIssue[]
+  result: SiteImportResult | null
 }
 
-interface SiteImportRow {
-  row: number
-  project_id: string
-  branch_code: string
-  branch_name: string
-  state: string
+function getImportErrorCode(error: unknown): string | null {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string'
+  ) {
+    return error.code
+  }
+  return null
+}
+
+function getImportErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
+    return error.message
+  }
+  return 'Unknown database error.'
+}
+
+async function fetchExistingSiteKeys(projectIds: string[]): Promise<Set<string>> {
+  const existingKeys = new Set<string>()
+  if (projectIds.length === 0) return existingKeys
+
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await supabase
+      .from('sites')
+      .select('project_id, branch_code')
+      .in('project_id', projectIds)
+      .range(offset, offset + 999)
+    if (error) throw error
+    for (const site of data ?? []) {
+      existingKeys.add(`${site.project_id}\u0000${site.branch_code}`)
+    }
+    if (!data || data.length < 1000) break
+  }
+
+  return existingKeys
 }
 
 export default function SitesPage() {
@@ -53,10 +104,13 @@ export default function SitesPage() {
   const [actionError, setActionError] = useState('')
   const [editing, setEditing] = useState<Site | null>(null)
   const [adding, setAdding] = useState(false)
-  const [uploadingSites, setUploadingSites] = useState(false)
+  const [preparingPreview, setPreparingPreview] = useState(false)
+  const [importingSites, setImportingSites] = useState(false)
   const [uploadError, setUploadError] = useState('')
-  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null)
+  const [siteImportPreview, setSiteImportPreview] = useState<SiteImportPreviewData | null>(null)
   const siteUploadInput = useRef<HTMLInputElement>(null)
+  const siteImportInProgress = useRef(false)
+  const importCompleted = Boolean(siteImportPreview?.result)
 
   const toggleTestData = useMutation({
     mutationFn: async ({ id, is_dummy }: { id: string; is_dummy: boolean }) => {
@@ -83,9 +137,9 @@ export default function SitesPage() {
     }
   }
 
-  async function importSiteFile(file: File) {
+  async function previewSiteFile(file: File) {
     setUploadError('')
-    setImportSummary(null)
+    setSiteImportPreview(null)
     if (file.size > MAX_UPLOAD_BYTES) {
       setUploadError('The Excel file must be 55 MB or smaller.')
       return
@@ -98,8 +152,12 @@ export default function SitesPage() {
       setUploadError('Could not load projects. Refresh the page before importing sites.')
       return
     }
+    if (!states.data || states.isLoading || states.isError || states.data.length === 0) {
+      setUploadError('Could not load canonical states. Refresh the page before previewing sites.')
+      return
+    }
 
-    setUploadingSites(true)
+    setPreparingPreview(true)
     try {
       const XLSX = await import('xlsx')
       const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
@@ -128,102 +186,292 @@ export default function SitesPage() {
       const projectIds = new Map(
         projects.data.map((project) => [project.name.trim().toLocaleLowerCase(), project.id]),
       )
-      const skippedRows: ImportIssue[] = []
-      let skipped = 0
-      let created = 0
-      const skip = (row: number, reason: string) => {
-        skipped += 1
-        if (skippedRows.length < 20) skippedRows.push({ row, reason })
-      }
+      const canonicalStates = states.data.map((state) => state.name)
+      const issues: SiteImportIssue[] = []
       const importRows: SiteImportRow[] = []
+      let totalRows = 0
 
       rows.slice(1).forEach((cells, index) => {
-        const values = columnIndexes.map((columnIndex) => String(cells[columnIndex] ?? '').trim())
+        const originalValues = columnIndexes.map((columnIndex) =>
+          String(cells[columnIndex] ?? ''),
+        )
+        const values = originalValues.map((value) => value.trim())
         if (values.every((value) => value === '')) return
+        totalRows += 1
         const rowNumber = index + 2
-        const [projectName, branchCode, branchName, state] = values
+        const [projectName, branchCode, branchName] = values
         const missingValues = REQUIRED_SITE_HEADERS.filter((_, columnIndex) => !values[columnIndex])
         if (missingValues.length > 0) {
-          skip(rowNumber, `missing ${missingValues.join(', ')}`)
+          issues.push({ row: rowNumber, reason: `missing ${missingValues.join(', ')}` })
           return
         }
         const projectId = projectIds.get(projectName.toLocaleLowerCase())
         if (!projectId) {
-          skip(rowNumber, `project '${projectName}' not found`)
+          issues.push({ row: rowNumber, reason: `project '${projectName}' not found` })
           return
         }
         importRows.push({
           row: rowNumber,
-          project_id: projectId,
-          branch_code: branchCode,
-          branch_name: branchName,
-          state,
+          projectId,
+          branchCode,
+          branchName,
+          originalState: originalValues[3],
+          stateMatch: matchReference(originalValues[3], canonicalStates, {
+            aliases: STATE_ALIASES,
+          }),
+          duplicate: false,
+          reviewDecision: 'pending',
+          selectedState: '',
         })
       })
 
-      const existingKeys = new Set<string>()
-      const uniqueProjectIds = [...new Set(importRows.map((row) => row.project_id))]
-      if (uniqueProjectIds.length > 0) {
-        for (let offset = 0; ; offset += 1000) {
-          const { data, error } = await supabase
-            .from('sites')
-            .select('project_id, branch_code')
-            .in('project_id', uniqueProjectIds)
-            .range(offset, offset + 999)
-          if (error) throw error
-          for (const site of data ?? []) {
-            existingKeys.add(`${site.project_id}\u0000${site.branch_code}`)
-          }
-          if (!data || data.length < 1000) break
-        }
-      }
+      const uniqueProjectIds = [...new Set(importRows.map((row) => row.projectId))]
+      const existingKeys = await fetchExistingSiteKeys(uniqueProjectIds)
 
-      const candidates: SiteImportRow[] = []
-      for (const row of importRows) {
-        const key = `${row.project_id}\u0000${row.branch_code}`
-        if (existingKeys.has(key)) {
-          skip(row.row, `duplicate Branch Code '${row.branch_code}' in this project`)
-        } else {
-          existingKeys.add(key)
-          candidates.push(row)
-        }
-      }
-
-      const insertRow = (row: SiteImportRow) => ({
-        project_id: row.project_id,
-        project_type_id: null,
-        branch_code: row.branch_code,
-        branch_name: row.branch_name,
-        state: row.state,
-        status: 'Active',
-        latitude: null,
-        longitude: null,
+      const previewRows = importRows.map((row) => {
+        const key = `${row.projectId}\u0000${row.branchCode}`
+        const duplicate = existingKeys.has(key)
+        existingKeys.add(key)
+        return { ...row, duplicate }
       })
-      for (let offset = 0; offset < candidates.length; offset += 100) {
-        const batch = candidates.slice(offset, offset + 100)
-        const { error } = await supabase.from('sites').insert(batch.map(insertRow))
-        if (!error) {
-          created += batch.length
+
+      setSiteImportPreview({
+        fileName: file.name,
+        totalRows,
+        validRows: importRows.length,
+        rows: previewRows,
+        issues,
+        result: null,
+      })
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'Could not prepare the site preview.')
+    } finally {
+      setPreparingPreview(false)
+    }
+  }
+
+  function updatePreviewRow(
+    rowNumber: number,
+    update: (row: SiteImportRow) => SiteImportRow,
+  ) {
+    setSiteImportPreview((current) =>
+      current
+        ? {
+            ...current,
+            rows: current.rows.map((row) => (row.row === rowNumber ? update(row) : row)),
+          }
+        : current,
+    )
+  }
+
+  function acceptFuzzySuggestion(rowNumber: number) {
+    updatePreviewRow(rowNumber, (row) =>
+      row.stateMatch.status === 'suggestion'
+        ? {
+            ...row,
+            reviewDecision: 'accepted',
+            selectedState: row.stateMatch.suggestedValue,
+          }
+        : row,
+    )
+  }
+
+  function rejectPreviewReview(rowNumber: number) {
+    updatePreviewRow(rowNumber, (row) => ({
+      ...row,
+      reviewDecision: 'rejected',
+      selectedState: '',
+    }))
+  }
+
+  function selectAmbiguousCandidate(rowNumber: number, selectedState: string) {
+    updatePreviewRow(rowNumber, (row) =>
+      row.stateMatch.status === 'ambiguous'
+        ? { ...row, selectedState }
+        : row,
+    )
+  }
+
+  function confirmAmbiguousCandidate(rowNumber: number) {
+    updatePreviewRow(rowNumber, (row) =>
+      row.stateMatch.status === 'ambiguous' &&
+      row.stateMatch.candidates.includes(row.selectedState)
+        ? { ...row, reviewDecision: 'accepted' }
+        : row,
+    )
+  }
+
+  function resetPreviewReview(rowNumber: number) {
+    updatePreviewRow(rowNumber, (row) => ({
+      ...row,
+      reviewDecision: 'pending',
+      selectedState: '',
+    }))
+  }
+
+  async function confirmSiteImport() {
+    const preview = siteImportPreview
+    if (!preview || preview.result || siteImportInProgress.current) return
+
+    const candidates = preview.rows.flatMap((row) => {
+      const state = resolveSiteImportState(row)
+      return isSiteImportRowImportable(row) && state ? [{ row, state }] : []
+    })
+    if (candidates.length === 0) return
+
+    siteImportInProgress.current = true
+    setImportingSites(true)
+    setUploadError('')
+
+    let inserted = 0
+    let failed = 0
+    const insertPayload = (row: SiteImportRow, state: string) => ({
+      project_id: row.projectId,
+      project_type_id: null,
+      branch_code: row.branchCode,
+      branch_name: row.branchName,
+      state,
+      status: 'Active',
+      latitude: null,
+      longitude: null,
+    })
+
+    try {
+      let existingKeys: Set<string>
+      try {
+        existingKeys = await fetchExistingSiteKeys([
+          ...new Set(candidates.map(({ row }) => row.projectId)),
+        ])
+      } catch (error) {
+        setUploadError(
+          `Could not re-check existing site codes. No sites were imported. ${getImportErrorMessage(error)}`,
+        )
+        return
+      }
+
+      const lateDuplicateRows: SiteImportRow[] = []
+      const candidatesToInsert = candidates.filter(({ row }) => {
+        const key = `${row.projectId}\u0000${row.branchCode}`
+        if (existingKeys.has(key)) {
+          lateDuplicateRows.push(row)
+          return false
+        }
+        existingKeys.add(key)
+        return true
+      })
+      const duplicateRows = [
+        ...preview.rows.filter((row) => row.duplicate),
+        ...lateDuplicateRows,
+      ]
+      const duplicateRowNumbers = new Set(duplicateRows.map((row) => row.row))
+      const unresolvedRows = preview.rows.filter(
+        (row) =>
+          !duplicateRowNumbers.has(row.row) && resolveSiteImportState(row) === null,
+      )
+      const details: SiteImportIssue[] = [
+        ...preview.issues,
+        ...duplicateRows.map((row) => ({
+          row: row.row,
+          reason: `duplicate Branch Code '${row.branchCode}' in this project`,
+        })),
+        ...unresolvedRows.map((row) => ({
+          row: row.row,
+          reason: `state '${row.originalState}' is unresolved`,
+        })),
+      ]
+      let duplicates = duplicateRows.length
+
+      for (let offset = 0; offset < candidatesToInsert.length; offset += 100) {
+        const batch = candidatesToInsert.slice(offset, offset + 100)
+        let batchError: unknown = null
+
+        try {
+          const { error } = await supabase
+            .from('sites')
+            .insert(batch.map(({ row, state }) => insertPayload(row, state)))
+          batchError = error
+        } catch (error) {
+          batchError = error
+        }
+
+        if (batchError === null) {
+          inserted += batch.length
           continue
         }
-        for (const row of batch) {
-          const { error: rowError } = await supabase.from('sites').insert(insertRow(row))
-          if (!rowError) {
-            created += 1
-          } else if (rowError.code === '23505') {
-            skip(row.row, `duplicate Branch Code '${row.branch_code}' in this project`)
-          } else {
-            skip(row.row, `could not create site: ${rowError.message}`)
+
+        for (const candidate of batch) {
+          try {
+            const { error } = await supabase
+              .from('sites')
+              .insert(insertPayload(candidate.row, candidate.state))
+            if (!error) {
+              inserted += 1
+            } else if (getImportErrorCode(error) === '23505') {
+              duplicates += 1
+              duplicateRowNumbers.add(candidate.row.row)
+              details.push({
+                row: candidate.row.row,
+                reason: `duplicate Branch Code '${candidate.row.branchCode}' in this project`,
+              })
+            } else {
+              failed += 1
+              details.push({
+                row: candidate.row.row,
+                reason: `could not create site: ${getImportErrorMessage(error)}`,
+              })
+            }
+          } catch (error) {
+            failed += 1
+            details.push({
+              row: candidate.row.row,
+              reason: `could not create site: ${getImportErrorMessage(error)}`,
+            })
           }
         }
       }
 
-      setImportSummary({ created, skipped, issues: skippedRows })
-      if (created > 0) await queryClient.invalidateQueries({ queryKey: ['sites'] })
+      const result: SiteImportResult = {
+        inserted,
+        failed,
+        skipped: preview.issues.length + unresolvedRows.length,
+        duplicates,
+        details,
+      }
+      setSiteImportPreview((current) =>
+        current
+          ? {
+              ...current,
+              rows: current.rows.map((row) =>
+                duplicateRowNumbers.has(row.row) ? { ...row, duplicate: true } : row,
+              ),
+              result,
+            }
+          : current,
+      )
+
+      if (candidatesToInsert.length > 0 || lateDuplicateRows.length > 0) {
+        try {
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['sites'] }),
+            queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] }),
+            queryClient.invalidateQueries({ queryKey: ['project-dashboard'] }),
+            queryClient.invalidateQueries({ queryKey: ['project-range-breakdown'] }),
+          ])
+        } catch (error) {
+          setUploadError(
+            `Import completed, but refreshed counts could not be loaded: ${getImportErrorMessage(error)}`,
+          )
+        }
+      }
     } catch (error) {
-      setUploadError(error instanceof Error ? error.message : 'Could not import the Excel file.')
+      setUploadError(
+        inserted > 0
+          ? `Import stopped after ${inserted} site(s) were inserted. Refresh the preview before retrying. ${getImportErrorMessage(error)}`
+          : `Import could not be completed. No sites were imported. ${getImportErrorMessage(error)}`,
+      )
     } finally {
-      setUploadingSites(false)
+      siteImportInProgress.current = false
+      setImportingSites(false)
     }
   }
 
@@ -278,21 +526,22 @@ export default function SitesPage() {
                   type="file"
                   accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                   hidden
+                  disabled={preparingPreview || importingSites || importCompleted}
                   onChange={(event) => {
                     const file = event.currentTarget.files?.[0]
                     event.currentTarget.value = ''
-                    if (file) void importSiteFile(file)
+                    if (file) void previewSiteFile(file)
                   }}
                 />
                 <button
                   type="button"
                   className="secondary"
-                  disabled={uploadingSites}
+                  disabled={preparingPreview || importingSites || importCompleted}
                   onClick={() => siteUploadInput.current?.click()}
                 >
-                  {uploadingSites ? 'Uploading...' : 'Upload sites (Excel)'}
+                  {preparingPreview ? 'Preparing preview...' : 'Preview sites (Excel)'}
                 </button>
-                <button type="button" className="link" disabled={uploadingSites} onClick={() => void downloadSiteTemplate()}>
+                <button type="button" className="link" disabled={preparingPreview || importingSites} onClick={() => void downloadSiteTemplate()}>
                   Download template
                 </button>
               </>
@@ -302,25 +551,6 @@ export default function SitesPage() {
         </div>
 
         {uploadError && <div className="banner error" role="alert">{uploadError}</div>}
-        {importSummary && (
-          <div className={`banner ${importSummary.skipped > 0 ? 'warn' : 'info'}`} role="status">
-            <p>
-              Import complete: {importSummary.created} sites created, {importSummary.skipped} skipped.
-            </p>
-            {importSummary.issues.length > 0 && (
-              <>
-                <ul>
-                  {importSummary.issues.map((issue) => (
-                    <li key={`${issue.row}-${issue.reason}`}>Row {issue.row}: {issue.reason}</li>
-                  ))}
-                </ul>
-                {importSummary.skipped > importSummary.issues.length && (
-                  <p>{importSummary.skipped - importSummary.issues.length} more skipped rows not shown.</p>
-                )}
-              </>
-            )}
-          </div>
-        )}
 
         <div className="filters">
           <input
@@ -437,6 +667,24 @@ export default function SitesPage() {
         <Pagination currentPage={page} totalItems={total} pageSize={PAGE_SIZE} onPageChange={setPage} disabled={sites.isFetching} itemLabel="sites" />
       </section>
 
+      {siteImportPreview && (
+        <SiteImportPreview
+          fileName={siteImportPreview.fileName}
+          totalRows={siteImportPreview.totalRows}
+          validRows={siteImportPreview.validRows}
+          rows={siteImportPreview.rows}
+          issues={siteImportPreview.issues}
+          result={siteImportPreview.result}
+          importing={importingSites}
+          onConfirmImport={() => void confirmSiteImport()}
+          onAcceptSuggestion={acceptFuzzySuggestion}
+          onRejectReview={rejectPreviewReview}
+          onSelectCandidate={selectAmbiguousCandidate}
+          onConfirmCandidate={confirmAmbiguousCandidate}
+          onResetReview={resetPreviewReview}
+          onClose={() => setSiteImportPreview(null)}
+        />
+      )}
       {adding && <SiteForm site={null} onClose={() => setAdding(false)} />}
       {editing && <SiteForm site={editing} onClose={() => setEditing(null)} />}
     </>

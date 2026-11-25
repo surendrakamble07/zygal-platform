@@ -11,6 +11,8 @@ import { TestDataBadge, TestDataFilter, TestDataToggle, type DummyFilter } from 
 import Pagination from '../components/Pagination'
 import { TableEmptyState, TableSkeleton } from '../components/TableStates'
 import UserForm from './UserForm'
+import AvailabilityIndicator from '../components/AvailabilityIndicator'
+import type { AvailabilityValue } from '../lib/availability'
 
 const PAGE_SIZE = 25
 const LIVE_REFRESH_MS = 20_000
@@ -27,6 +29,11 @@ interface OnlineRow {
   full_name: string
   started_at: string
   last_active_at: string
+  availability: {
+    status: AvailabilityValue
+    remark: string | null
+    since: string
+  } | null
 }
 
 function timeAgo(iso: string): string {
@@ -48,7 +55,35 @@ function OnlineNow() {
         .select('session_id, user_id, full_name, started_at, last_active_at')
         .order('last_active_at', { ascending: false })
       if (error) throw error
-      return (data ?? []) as OnlineRow[]
+      const onlineRows = (data ?? []) as Omit<OnlineRow, 'availability'>[]
+      const userIds = [...new Set(onlineRows.map((row) => row.user_id))]
+      const availabilityByUser = new Map<
+        string,
+        NonNullable<OnlineRow['availability']>
+      >()
+      if (userIds.length > 0) {
+        const { data: availabilityRows, error: availabilityError } = await supabase
+          .from('availability_status')
+          .select('user_id, status, remark, since')
+          .in('user_id', userIds)
+        if (availabilityError) throw availabilityError
+        for (const row of (availabilityRows ?? []) as unknown as {
+          user_id: string
+          status: AvailabilityValue
+          remark: string | null
+          since: string
+        }[]) {
+          availabilityByUser.set(row.user_id, {
+            status: row.status,
+            remark: row.remark,
+            since: row.since,
+          })
+        }
+      }
+      return onlineRows.map((row) => ({
+        ...row,
+        availability: availabilityByUser.get(row.user_id) ?? null,
+      }))
     },
   })
 
@@ -70,25 +105,38 @@ function OnlineNow() {
               <th>Name</th>
               <th>Logged in since</th>
               <th>Last active</th>
+              <th>Availability</th>
             </tr>
           </thead>
           <tbody>
-            {online.isLoading && <TableSkeleton columns={3} rows={2} />}
+            {online.isLoading && <TableSkeleton columns={4} rows={2} />}
             {!online.isLoading && rows.length === 0 && (
-              <TableEmptyState columns={3} message="Nobody is online right now." />
+              <TableEmptyState columns={4} message="Nobody is online right now." />
             )}
-            {rows.map((r) => (
-              <tr key={r.session_id}>
-                <td>
-                  <span className="person-cell">
-                    <Avatar name={r.full_name} />
-                    <span><span className="dot-online" aria-hidden="true" /> {r.full_name}</span>
-                  </span>
-                </td>
-                <td>{new Date(r.started_at).toLocaleTimeString()}</td>
-                <td>{timeAgo(r.last_active_at)}</td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const availability = r.availability
+              return (
+                <tr key={r.session_id}>
+                  <td>
+                    <span className="person-cell">
+                      <Avatar name={r.full_name} />
+                      <span><span className="dot-online" aria-hidden="true" /> {r.full_name}</span>
+                    </span>
+                  </td>
+                  <td>{new Date(r.started_at).toLocaleTimeString()}</td>
+                  <td>{timeAgo(r.last_active_at)}</td>
+                  <td>
+                    <AvailabilityIndicator
+                      status={availability?.status ?? 'Free'}
+                      since={availability?.since}
+                    />
+                    {availability?.status === 'Busy' && availability.remark && (
+                      <span className="availability-remark">{availability.remark}</span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

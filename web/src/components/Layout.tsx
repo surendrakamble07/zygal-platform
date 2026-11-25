@@ -5,6 +5,11 @@ import { useAuth, type Role } from "../auth/auth-context";
 import { LogoMark } from "./Logo";
 import Icon, { type IconName } from "./Icon";
 import { supabase } from "../lib/supabase";
+import {
+  type AvailabilityRecord,
+  type AvailabilityValue,
+} from "../lib/availability";
+import AvailabilityIndicator from "./AvailabilityIndicator";
 
 type BreakType = "Lunch" | "Tea";
 
@@ -18,6 +23,7 @@ interface BreakEvent {
 }
 
 const ACTIVE_BREAK_QUERY = "active-break";
+const AVAILABILITY_QUERY = "availability-status";
 
 interface NavItem {
   to: string;
@@ -60,6 +66,9 @@ export default function Layout() {
   const [breakToStart, setBreakToStart] = useState<BreakType | null>(null);
   const [startRemark, setStartRemark] = useState("");
   const [breakError, setBreakError] = useState("");
+  const [busyModalOpen, setBusyModalOpen] = useState(false);
+  const [availabilityRemark, setAvailabilityRemark] = useState("");
+  const [availabilityError, setAvailabilityError] = useState("");
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState("");
@@ -83,6 +92,23 @@ export default function Layout() {
       return data as BreakEvent | null;
     },
   });
+  const availabilityQuery = useQuery({
+    queryKey: [AVAILABILITY_QUERY, profile?.id],
+    enabled: !!profile?.id,
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      if (!profile?.id) throw new Error("Your profile is unavailable.");
+      const { data, error } = await supabase
+        .from("availability_status")
+        .select("user_id, status, remark, since, updated_at")
+        .eq("user_id", profile.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data as AvailabilityRecord | null;
+    },
+  });
+  const availability = availabilityQuery.data ?? null;
+  const isAvailabilityBusy = availability?.status === "Busy";
   const activeBreak = activeBreakQuery.data ?? null;
   const activeBreakId = activeBreak?.id;
   const startBreak = useMutation({
@@ -167,6 +193,47 @@ export default function Layout() {
       setBreakError(error instanceof Error ? error.message : "Could not end the break.");
     },
   });
+  const updateAvailability = useMutation({
+    mutationFn: async ({
+      status,
+      remark,
+    }: {
+      status: AvailabilityValue;
+      remark: string | null;
+    }) => {
+      if (!profile?.id) throw new Error("Your profile is unavailable.");
+      const now = new Date().toISOString();
+      const { data, error } = await supabase
+        .from("availability_status")
+        .upsert(
+          {
+            user_id: profile.id,
+            status,
+            remark,
+            since: now,
+            updated_at: now,
+          },
+          { onConflict: "user_id" },
+        )
+        .select("user_id, status, remark, since, updated_at")
+        .single();
+      if (error) throw error;
+      return data as AvailabilityRecord;
+    },
+    onSuccess: (row) => {
+      setAvailabilityError("");
+      setAvailabilityRemark("");
+      setBusyModalOpen(false);
+      queryClient.setQueryData([AVAILABILITY_QUERY, profile?.id], row);
+      void queryClient.invalidateQueries({ queryKey: ["online-now"] });
+      void queryClient.invalidateQueries({ queryKey: ["activity-logs"] });
+    },
+    onError: (error) => {
+      setAvailabilityError(
+        error instanceof Error ? error.message : "Could not update your availability.",
+      );
+    },
+  });
   const sendFeedback = useMutation({
     mutationFn: async (message: string) => {
       const { data, error } = await supabase.functions.invoke<{
@@ -208,10 +275,23 @@ export default function Layout() {
   });
 
   useEffect(() => {
-    if (!activeBreakId) return;
+    if (!activeBreakId && !isAvailabilityBusy) return;
     const timer = window.setInterval(() => setClockNow(Date.now()), 15_000);
     return () => window.clearInterval(timer);
-  }, [activeBreakId]);
+  }, [activeBreakId, isAvailabilityBusy]);
+
+  useEffect(() => {
+    if (!busyModalOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !updateAvailability.isPending) {
+        setBusyModalOpen(false);
+        setAvailabilityRemark("");
+        setAvailabilityError("");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busyModalOpen, updateAvailability.isPending]);
 
   if (!profile) return null;
 
@@ -366,6 +446,39 @@ export default function Layout() {
               </button>
             </>
           )}
+          {isAvailabilityBusy ? (
+            <>
+              <AvailabilityIndicator
+                status="Busy"
+                since={availability?.since}
+                now={clockNow}
+              />
+              <button
+                type="button"
+                className="secondary topbar-action"
+                disabled={availabilityQuery.isLoading || availabilityQuery.isError || updateAvailability.isPending}
+                onClick={() => {
+                  setAvailabilityError("");
+                  updateAvailability.mutate({ status: "Free", remark: null });
+                }}
+              >
+                {updateAvailability.isPending ? "Updating..." : "Mark Free"}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="secondary topbar-action"
+              disabled={availabilityQuery.isLoading || availabilityQuery.isError || updateAvailability.isPending}
+              onClick={() => {
+                setAvailabilityError("");
+                setAvailabilityRemark("");
+                setBusyModalOpen(true);
+              }}
+            >
+              Mark Busy
+            </button>
+          )}
           <button
             className="secondary topbar-action logout-action"
             disabled={busy}
@@ -391,6 +504,12 @@ export default function Layout() {
       )}
       {activeBreakQuery.isError && (
         <div className="break-error" role="alert">Could not load your break status.</div>
+      )}
+      {availabilityError && !busyModalOpen && (
+        <div className="break-error" role="alert">{availabilityError}</div>
+      )}
+      {availabilityQuery.isError && (
+        <div className="break-error" role="alert">Could not load your availability status.</div>
       )}
       {breakToStart && (
         <div
@@ -437,6 +556,69 @@ export default function Layout() {
                 onClick={() => startBreak.mutate({ breakType: breakToStart, remark: startRemark })}
               >
                 {startBreak.isPending ? "Starting..." : "Confirm"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {busyModalOpen && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !updateAvailability.isPending) {
+              setBusyModalOpen(false);
+            }
+          }}
+        >
+          <section
+            className="modal break-confirmation"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="availability-confirmation-title"
+          >
+            <h2 id="availability-confirmation-title">Mark yourself Busy?</h2>
+            <p>Your availability and remark will be visible to the team.</p>
+            <label>
+              Why are you busy? (required)
+              <textarea
+                rows={4}
+                required
+                placeholder="On a call with..."
+                value={availabilityRemark}
+                onChange={(event) => {
+                  setAvailabilityRemark(event.target.value);
+                  if (event.target.value.trim()) setAvailabilityError("");
+                }}
+                aria-required="true"
+                aria-invalid={!!availabilityError}
+                disabled={updateAvailability.isPending}
+              />
+            </label>
+            {availabilityError && <div className="banner error" role="alert">{availabilityError}</div>}
+            <div className="actions">
+              <button
+                type="button"
+                className="secondary"
+                disabled={updateAvailability.isPending}
+                onClick={() => {
+                  setBusyModalOpen(false);
+                  setAvailabilityRemark("");
+                  setAvailabilityError("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={updateAvailability.isPending || !availabilityRemark.trim()}
+                onClick={() =>
+                  updateAvailability.mutate({
+                    status: "Busy",
+                    remark: availabilityRemark.trim(),
+                  })
+                }
+              >
+                {updateAvailability.isPending ? "Updating..." : "Confirm"}
               </button>
             </div>
           </section>

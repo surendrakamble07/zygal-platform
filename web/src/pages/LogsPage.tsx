@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase'
 const PAGE_SIZE = 50
 const ROW_LIMIT = 200
 
-type FeedType = 'login' | 'data' | 'job-status' | 'break'
+type FeedType = 'login' | 'data' | 'job-status' | 'break' | 'availability'
 type FilterType = 'all' | FeedType
 type JsonRecord = Record<string, unknown>
 
@@ -44,6 +44,13 @@ interface BreakStartRow {
 
 interface BreakEndRow extends BreakStartRow {
   ended_at: string
+}
+
+interface AvailabilityActivityRow {
+  user_id: string
+  status: 'Free' | 'Busy'
+  remark: string | null
+  updated_at: string
 }
 
 interface JobStatusRow {
@@ -135,6 +142,7 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
     statusResult,
     breakStartResult,
     breakEndResult,
+    availabilityResult,
   ] = await Promise.all([
     (() => {
       let query = supabase
@@ -198,6 +206,16 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
       if (dateTo) query = query.lt('ended_at', nextDayStart(dateTo))
       return query
     })(),
+    (() => {
+      let query = supabase
+        .from('availability_status')
+        .select('user_id, status, remark, updated_at')
+        .order('updated_at', { ascending: false })
+        .limit(ROW_LIMIT)
+      if (dateFrom) query = query.gte('updated_at', dayStart(dateFrom))
+      if (dateTo) query = query.lt('updated_at', nextDayStart(dateTo))
+      return query
+    })(),
   ])
 
   if (auditResult.error) throw auditResult.error
@@ -206,6 +224,7 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
   if (statusResult.error) throw statusResult.error
   if (breakStartResult.error) throw breakStartResult.error
   if (breakEndResult.error) throw breakEndResult.error
+  if (availabilityResult.error) throw availabilityResult.error
 
   const auditRows = auditResult.data as AuditRow[]
   const sessionStartRows = sessionStartResult.data as SessionStartRow[]
@@ -213,6 +232,7 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
   const statusRows = statusResult.data as JobStatusRow[]
   const breakStartRows = breakStartResult.data as BreakStartRow[]
   const breakEndRows = breakEndResult.data as BreakEndRow[]
+  const availabilityRows = availabilityResult.data as AvailabilityActivityRow[]
   const profileIds = [...new Set([
     ...auditRows.map((row) => row.changed_by),
     ...sessionStartRows.map((row) => row.user_id),
@@ -220,6 +240,7 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
     ...statusRows.map((row) => row.changed_by),
     ...breakStartRows.map((row) => row.user_id),
     ...breakEndRows.map((row) => row.user_id),
+    ...availabilityRows.map((row) => row.user_id),
   ].filter((id): id is string => id !== null))]
   const jobIds = [...new Set(statusRows.map((row) => row.job_id))]
 
@@ -327,6 +348,21 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
         timestamp: row.ended_at,
       }
     }),
+    ...availabilityRows.map((row): Activity => {
+      const person = people.get(row.user_id) ?? 'Unknown'
+      const isBusy = row.status === 'Busy'
+      const remark = row.remark?.trim()
+      return {
+        id: `availability-${row.user_id}-${row.updated_at}`,
+        type: 'availability',
+        person,
+        message: isBusy
+          ? `${person} marked themselves Busy${remark ? `: '${remark}'` : ''}`
+          : `${person} marked themselves Free`,
+        badge: isBusy ? 'Marked Busy' : 'Marked Free',
+        timestamp: row.updated_at,
+      }
+    }),
   ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
   let loginActivityCount = 0
   const activities = mergedActivities.filter((activity) => {
@@ -343,7 +379,8 @@ async function loadActivities(dateFrom: string, dateTo: string): Promise<Activit
       || sessionStartRows.length + sessionEndRows.length > ROW_LIMIT
       || statusRows.length === ROW_LIMIT
       || breakStartRows.length === ROW_LIMIT
-      || breakEndRows.length === ROW_LIMIT,
+      || breakEndRows.length === ROW_LIMIT
+      || availabilityRows.length === ROW_LIMIT,
   }
 }
 
@@ -378,7 +415,7 @@ export default function LogsPage() {
       <div className="head-row">
         <div>
           <h2>Activity logs</h2>
-          <p className="muted small">Recent account, data, and job status activity</p>
+          <p className="muted small">Recent account, data, and job status activity. Availability shows each user's latest update.</p>
         </div>
         <span className="muted small">{filtered.length} activities</span>
       </div>
@@ -398,6 +435,7 @@ export default function LogsPage() {
           <option value="data">Data changes</option>
           <option value="job-status">Job status changes</option>
           <option value="break">Breaks</option>
+          <option value="availability">Availability</option>
         </select>
         <input
           type="search"
