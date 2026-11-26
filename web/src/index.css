@@ -900,9 +900,6 @@ a.link:hover {
 .break-confirmation p {
   color: var(--muted);
 }
-.who {
-  font-size: 0.9rem;
-}
 .topbar-action {
   min-height: 42px;
   display: inline-flex;
@@ -1996,11 +1993,6 @@ textarea {
     flex-wrap: wrap;
     width: 100%;
     gap: 8px;
-  }
-  .who {
-    flex-basis: 100%;
-    min-width: 0;
-    white-space: normal;
   }
   .content {
     padding: 14px 10px;

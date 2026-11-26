@@ -352,10 +352,6 @@ export default function Layout() {
           </div>
         </div>
         <div className="topbar-right">
-          <span className="who">
-            {profile.full_name}{" "}
-            <span className="muted">· {ROLE_LABEL[profile.role]}</span>
-          </span>
           <a
             href={`${import.meta.env.BASE_URL}ZYGAL_User_Guide.pdf`}
             target="_blank"
