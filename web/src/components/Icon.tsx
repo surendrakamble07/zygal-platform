@@ -1,4 +1,4 @@
-export type IconName = 'dashboard' | 'sites' | 'devices' | 'jobs' | 'reports' | 'users' | 'logs' | 'edit' | 'view' | 'plus' | 'empty'
+export type IconName = 'dashboard' | 'sites' | 'devices' | 'jobs' | 'reports' | 'users' | 'logs' | 'edit' | 'view' | 'plus' | 'empty' | 'logout'
 
 interface Props {
   name: IconName
@@ -18,6 +18,7 @@ const PATHS: Record<IconName, string> = {
   view: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Zm10-3a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z',
   plus: 'M12 5v14m-7-7h14',
   empty: 'M4 5h16v14H4zM8 9h8m-8 4h5',
+  logout: 'M10 17l5-5-5-5m5 5H3m9-8h8v16h-8',
 }
 
 export default function Icon({ name, size = 18, className }: Props) {

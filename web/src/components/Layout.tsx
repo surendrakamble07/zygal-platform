@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth, type Role } from "../auth/auth-context";
@@ -9,7 +9,7 @@ import {
   type AvailabilityRecord,
   type AvailabilityValue,
 } from "../lib/availability";
-import AvailabilityIndicator from "./AvailabilityIndicator";
+import Avatar from "./Avatar";
 
 type BreakType = "Lunch" | "Tea";
 
@@ -70,10 +70,12 @@ export default function Layout() {
   const [availabilityRemark, setAvailabilityRemark] = useState("");
   const [availabilityError, setAvailabilityError] = useState("");
   const [clockNow, setClockNow] = useState(() => Date.now());
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [feedbackError, setFeedbackError] = useState("");
   const [feedbackNotice, setFeedbackNotice] = useState("");
+  const profileMenuRef = useRef<HTMLDivElement>(null);
   const activeBreakQuery = useQuery({
     queryKey: [ACTIVE_BREAK_QUERY, profile?.id],
     enabled: !!profile?.id,
@@ -293,6 +295,24 @@ export default function Layout() {
     return () => window.removeEventListener("keydown", onKey);
   }, [busyModalOpen, updateAvailability.isPending]);
 
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setProfileMenuOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProfileMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [profileMenuOpen]);
+
   if (!profile) return null;
 
   // Hiding a link is only a convenience. The database rules are the real protection.
@@ -387,115 +407,128 @@ export default function Layout() {
             </svg>
             {theme === "dark" ? "Light mode" : "Dark mode"}
           </button>
-          <button
-            type="button"
-            className="secondary topbar-action"
-            onClick={() => {
-              setFeedbackError("");
-              setFeedbackNotice("");
-              setFeedbackOpen(true);
-            }}
-          >
-            Feedback
-          </button>
           {feedbackNotice && <span className="hint ok" role="status">{feedbackNotice}</span>}
-          {activeBreak ? (
-            <>
-              <span
-                className={`break-indicator${breakMinutesLeft !== null && breakMinutesLeft <= 0 ? " overdue" : ""}`}
-                role="status"
-              >
-                {activeBreak.break_type}: {breakMinutesLeft !== null && breakMinutesLeft <= 0
-                  ? "overdue"
-                  : `${breakMinutesLeft}m left`}
-              </span>
-              <button
-                type="button"
-                className="secondary topbar-action"
-                disabled={endBreak.isPending}
-                onClick={() => endBreak.mutate(activeBreak)}
-              >
-                {endBreak.isPending ? "Ending..." : "End break"}
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="secondary topbar-action"
-                disabled={activeBreakQuery.isLoading || activeBreakQuery.isError || startBreak.isPending}
-                onClick={() => {
-                  setBreakError("");
-                  setStartRemark("");
-                  setBreakToStart("Lunch");
-                }}
-              >
-                Lunch Break
-              </button>
-              <button
-                type="button"
-                className="secondary topbar-action"
-                disabled={activeBreakQuery.isLoading || activeBreakQuery.isError || startBreak.isPending}
-                onClick={() => {
-                  setBreakError("");
-                  setStartRemark("");
-                  setBreakToStart("Tea");
-                }}
-              >
-                Tea Break
-              </button>
-            </>
-          )}
-          {isAvailabilityBusy ? (
-            <>
-              <AvailabilityIndicator
-                status="Busy"
-                since={availability?.since}
-                now={clockNow}
-              />
-              <button
-                type="button"
-                className="secondary topbar-action"
-                disabled={availabilityQuery.isLoading || availabilityQuery.isError || updateAvailability.isPending}
-                onClick={() => {
-                  setAvailabilityError("");
-                  updateAvailability.mutate({ status: "Free", remark: null });
-                }}
-              >
-                {updateAvailability.isPending ? "Updating..." : "Mark Free"}
-              </button>
-            </>
-          ) : (
+          <div className="profile-menu-wrap" ref={profileMenuRef}>
             <button
               type="button"
-              className="secondary topbar-action"
-              disabled={availabilityQuery.isLoading || availabilityQuery.isError || updateAvailability.isPending}
-              onClick={() => {
-                setAvailabilityError("");
-                setAvailabilityRemark("");
-                setBusyModalOpen(true);
+              className="profile-menu-trigger"
+              aria-haspopup="menu"
+              aria-expanded={profileMenuOpen}
+              onClick={() => setProfileMenuOpen((open) => !open)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setProfileMenuOpen(true);
+                }
               }}
             >
-              Mark Busy
-            </button>
-          )}
-          <button
-            className="secondary topbar-action logout-action"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              await signOut();
-            }}
-          >
-            <span className="topbar-action-icon logout-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M13 4h6a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6" />
-                <path d="M3 12h12m-4-4 4 4-4 4" />
-                <path d="M13 4v3m0 10v3" />
+              <Avatar name={profile.full_name} size={38} />
+              <span className="profile-menu-person">
+                <strong>{profile.full_name}</strong>
+                <span>{profile.job_title || ROLE_LABEL[profile.role]}</span>
+              </span>
+              <svg className="profile-menu-arrow" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="m3.5 6 4.5 4.5L12.5 6" />
               </svg>
-            </span>
-            {busy ? "Signing out..." : "Log out"}
-          </button>
+            </button>
+            {profileMenuOpen && (
+              <div className="profile-menu" role="menu">
+                <div className="profile-status-card" role="status">
+                  {activeBreak ? (
+                    <>
+                      <span className="profile-status-dot break" />
+                      <strong>{activeBreak.break_type === "Lunch" ? "On Lunch Break" : "On Tea Break"}</strong>
+                      <small>{breakMinutesLeft !== null && breakMinutesLeft <= 0 ? "Break overdue" : `${breakMinutesLeft}m remaining`}</small>
+                    </>
+                  ) : isAvailabilityBusy ? (
+                    <>
+                      <span className="profile-status-dot busy" />
+                      <strong>Busy</strong>
+                      {availability?.remark && <small>{availability.remark}</small>}
+                    </>
+                  ) : (
+                    <>
+                      <span className="profile-status-dot free" />
+                      <strong>Free</strong>
+                      <small>{availabilityQuery.isLoading ? "Loading status" : "Available for work"}</small>
+                    </>
+                  )}
+                </div>
+                {isAvailabilityBusy ? (
+                  <button type="button" role="menuitem" className="profile-menu-action" disabled={updateAvailability.isPending} onClick={() => {
+                    setProfileMenuOpen(false);
+                    setAvailabilityError("");
+                    updateAvailability.mutate({ status: "Free", remark: null });
+                  }}>
+                    <span className="profile-action-icon profile-action-icon-green"><Icon name="users" size={17} /></span>
+                    <span>Mark Free</span>
+                  </button>
+                ) : (
+                  <button type="button" role="menuitem" className="profile-menu-action" disabled={availabilityQuery.isLoading || availabilityQuery.isError || updateAvailability.isPending} onClick={() => {
+                    setProfileMenuOpen(false);
+                    setAvailabilityError("");
+                    setAvailabilityRemark("");
+                    setBusyModalOpen(true);
+                  }}>
+                    <span className="profile-action-icon profile-action-icon-orange"><Icon name="users" size={17} /></span>
+                    <span>Mark Busy</span>
+                  </button>
+                )}
+                {activeBreak ? (
+                  <button type="button" role="menuitem" className="profile-menu-action" disabled={endBreak.isPending} onClick={() => {
+                    setProfileMenuOpen(false);
+                    endBreak.mutate(activeBreak);
+                  }}>
+                    <span className="profile-action-icon profile-action-icon-orange"><Icon name="jobs" size={17} /></span>
+                    <span>{endBreak.isPending ? "Ending..." : `End ${activeBreak.break_type} Break`}</span>
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" role="menuitem" className="profile-menu-action" disabled={activeBreakQuery.isLoading || activeBreakQuery.isError || startBreak.isPending} onClick={() => {
+                      setProfileMenuOpen(false);
+                      setBreakError("");
+                      setStartRemark("");
+                      setBreakToStart("Lunch");
+                    }}>
+                      <span className="profile-action-icon profile-action-icon-orange"><Icon name="jobs" size={17} /></span>
+                      <span>Start Lunch Break</span>
+                    </button>
+                    <button type="button" role="menuitem" className="profile-menu-action" disabled={activeBreakQuery.isLoading || activeBreakQuery.isError || startBreak.isPending} onClick={() => {
+                      setProfileMenuOpen(false);
+                      setBreakError("");
+                      setStartRemark("");
+                      setBreakToStart("Tea");
+                    }}>
+                      <span className="profile-action-icon profile-action-icon-blue"><Icon name="jobs" size={17} /></span>
+                      <span>Start Tea Break</span>
+                    </button>
+                  </>
+                )}
+                <button type="button" role="menuitem" className="profile-menu-action" onClick={() => {
+                  setProfileMenuOpen(false);
+                  setFeedbackError("");
+                  setFeedbackNotice("");
+                  setFeedbackOpen(true);
+                }}>
+                  <span className="profile-action-icon profile-action-icon-blue"><Icon name="logs" size={17} /></span>
+                  <span>Send Feedback</span>
+                </button>
+                <div className="profile-menu-divider" />
+                <button type="button" role="menuitem" className="profile-menu-action" onClick={() => setProfileMenuOpen(false)}>
+                  <span className="profile-action-icon profile-action-icon-neutral"><Icon name="users" size={17} /></span>
+                  <span className="profile-action-details">{profile.full_name}<small>{profile.email}</small></span>
+                </button>
+                <button type="button" role="menuitem" className="profile-menu-action danger" disabled={busy} onClick={async () => {
+                  setProfileMenuOpen(false);
+                  setBusy(true);
+                  await signOut();
+                }}>
+                  <span className="profile-action-icon profile-action-icon-red"><Icon name="logout" size={17} /></span>
+                  <span>{busy ? "Signing out..." : "Logout"}</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 

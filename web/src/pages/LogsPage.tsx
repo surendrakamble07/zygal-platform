@@ -134,7 +134,7 @@ function relativeTime(value: string): string {
   return new Date(value).toLocaleDateString()
 }
 
-async function loadActivities(dateFrom: string, dateTo: string): Promise<ActivityData> {
+async function loadActivityFeed(dateFrom: string, dateTo: string): Promise<ActivityData> {
   const [
     auditResult,
     sessionStartResult,
@@ -392,7 +392,7 @@ export default function LogsPage() {
   const [page, setPage] = useState(0)
   const logs = useQuery({
     queryKey: ['activity-logs', dateFrom, dateTo],
-    queryFn: () => loadActivities(dateFrom, dateTo),
+    queryFn: () => loadActivityFeed(dateFrom, dateTo),
   })
 
   const filtered = useMemo(() => {

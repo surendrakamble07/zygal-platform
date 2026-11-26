@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/auth-context'
 import { useMyProductivity } from '../lib/report-queries'
+import Icon from '../components/Icon'
 
 type DateRangePreset = 'this-month' | 'last-month' | 'custom'
 
@@ -84,15 +85,24 @@ export default function MyActivityPage() {
 
       <div className="project-dashboard-grid" aria-live="polite">
         <article className="kpi">
-          <div className="kpi-label">Jobs created</div>
+          <div className="kpi-heading">
+            <span className="kpi-icon kpi-icon-blue"><Icon name="jobs" size={20} /></span>
+            <div className="kpi-label">Jobs created</div>
+          </div>
           <div className="kpi-number">{activity.isLoading ? '...' : row?.jobs_created ?? '-'}</div>
         </article>
         <article className="kpi">
-          <div className="kpi-label">Jobs completed / live</div>
+          <div className="kpi-heading">
+            <span className="kpi-icon kpi-icon-ok"><Icon name="reports" size={20} /></span>
+            <div className="kpi-label">Jobs completed / live</div>
+          </div>
           <div className="kpi-number">{activity.isLoading ? '...' : row?.completed_jobs ?? '-'}</div>
         </article>
         <article className="kpi">
-          <div className="kpi-label">Hours logged in</div>
+          <div className="kpi-heading">
+            <span className="kpi-icon kpi-icon-neutral"><Icon name="logs" size={20} /></span>
+            <div className="kpi-label">Hours logged in</div>
+          </div>
           <div className="kpi-number">{activity.isLoading ? '...' : row?.active_time ?? '-'}</div>
         </article>
       </div>

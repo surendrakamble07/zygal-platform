@@ -4,6 +4,12 @@ import { supabase } from './supabase'
 export interface DashboardStats {
   totalSites: number
   activeSites: number
+  activeEmployees: number
+  loggedInToday: number
+  jobsToday: number
+  completedToday: number
+  liveToday: number
+  pendingToday: number
   totalJobsThisMonth: number
   pendingHandover: number
   pendingMaterial: number
@@ -58,14 +64,72 @@ export function currentMonthStart(): string {
   return localMonthStart(d)
 }
 
+function kolkataTodayRange(): { start: string; end: string } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  const today = `${values.year}-${values.month}-${values.day}`
+  const [year, month, day] = today.split('-').map(Number)
+  const tomorrow = new Date(Date.UTC(year, month - 1, day + 1))
+    .toISOString()
+    .slice(0, 10)
+  return { start: `${today}T00:00:00+05:30`, end: `${tomorrow}T00:00:00+05:30` }
+}
+
 export function useDashboardStats(range: { start: string; end: string }) {
   return useQuery({
     queryKey: ['dashboard-stats', range.start, range.end],
     queryFn: async (): Promise<DashboardStats> => {
-      const [sitesTotal, sitesActive, jobsThisMonth, pendingHandover, pendingMaterial, completed, statusBreakdown, recent] =
+      const today = kolkataTodayRange()
+      const [sitesTotal, sitesActive, activeEmployees, loggedInSessions, jobsToday, completedToday, liveToday, pendingToday, jobsThisMonth, pendingHandover, pendingMaterial, completed, statusBreakdown, recent] =
         await Promise.all([
           supabase.from('sites').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('is_dummy', false),
           supabase.from('sites').select('id', { count: 'exact', head: true }).is('deleted_at', null).eq('is_dummy', false).eq('status', 'Active'),
+          supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('is_active', true).eq('is_dummy', false),
+          supabase
+            .from('user_sessions')
+            .select('user_id')
+            .gte('started_at', today.start)
+            .lt('started_at', today.end),
+          supabase
+            .from('jobs')
+            .select('id, site:sites!inner ( is_dummy )', { count: 'exact', head: true })
+            .is('deleted_at', null)
+            .eq('is_dummy', false)
+            .eq('site.is_dummy', false)
+            .gte('job_date', today.start.slice(0, 10))
+            .lt('job_date', today.end.slice(0, 10)),
+          supabase
+            .from('jobs')
+            .select('id, site:sites!inner ( is_dummy )', { count: 'exact', head: true })
+            .is('deleted_at', null)
+            .eq('is_dummy', false)
+            .eq('site.is_dummy', false)
+            .gte('job_date', today.start.slice(0, 10))
+            .lt('job_date', today.end.slice(0, 10))
+            .eq('final_status', 'Completed'),
+          supabase
+            .from('jobs')
+            .select('id, site:sites!inner ( is_dummy )', { count: 'exact', head: true })
+            .is('deleted_at', null)
+            .eq('is_dummy', false)
+            .eq('site.is_dummy', false)
+            .gte('job_date', today.start.slice(0, 10))
+            .lt('job_date', today.end.slice(0, 10))
+            .eq('final_status', 'Live'),
+          supabase
+            .from('jobs')
+            .select('id, site:sites!inner ( is_dummy )', { count: 'exact', head: true })
+            .is('deleted_at', null)
+            .eq('is_dummy', false)
+            .eq('site.is_dummy', false)
+            .gte('job_date', today.start.slice(0, 10))
+            .lt('job_date', today.end.slice(0, 10))
+            .eq('final_status', 'Pending'),
           supabase
             .from('jobs')
             .select('id, site:sites!inner ( is_dummy )', { count: 'exact', head: true })
@@ -116,6 +180,8 @@ export function useDashboardStats(range: { start: string; end: string }) {
             .limit(8),
         ])
 
+      if (activeEmployees.error) throw activeEmployees.error
+      if (loggedInSessions.error) throw loggedInSessions.error
       if (statusBreakdown.error) throw statusBreakdown.error
 
       const byFinalStatusMap = new Map<string, number>()
@@ -127,6 +193,14 @@ export function useDashboardStats(range: { start: string; end: string }) {
       return {
         totalSites: sitesTotal.count ?? 0,
         activeSites: sitesActive.count ?? 0,
+        activeEmployees: activeEmployees.count ?? 0,
+        loggedInToday: new Set(
+          (loggedInSessions.data ?? []).map((row) => row.user_id).filter(Boolean),
+        ).size,
+        jobsToday: jobsToday.count ?? 0,
+        completedToday: completedToday.count ?? 0,
+        liveToday: liveToday.count ?? 0,
+        pendingToday: pendingToday.count ?? 0,
         totalJobsThisMonth: jobsThisMonth.count ?? 0,
         pendingHandover: pendingHandover.count ?? 0,
         pendingMaterial: pendingMaterial.count ?? 0,
