@@ -34,18 +34,18 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: "dashboard" },
-  { to: "/sites", label: "Sites", icon: "sites" },
-  { to: "/devices", label: "SIM Cards", icon: "devices" },
-  { to: "/jobs", label: "Jobs", icon: "jobs" },
-  { to: "/notes", label: "My Notes", icon: "empty" },
-  { to: "/my-activity", label: "My Activity", icon: "reports" },
+  { to: "/sites", label: "Sites", icon: "building" },
+  { to: "/devices", label: "SIM Cards", icon: "smartphone" },
+  { to: "/jobs", label: "Jobs", icon: "clipboard-list" },
+  { to: "/notes", label: "My Notes", icon: "note" },
+  { to: "/my-activity", label: "My Activity", icon: "activity" },
   {
     to: "/reports",
     label: "Reports",
-    icon: "reports",
+    icon: "chart",
     roles: ["team_lead", "admin"],
   },
-  { to: "/logs", label: "Logs", icon: "logs", roles: ["team_lead", "admin"] },
+  { to: "/logs", label: "Logs", icon: "list", roles: ["team_lead", "admin"] },
   { to: "/users", label: "Users", icon: "users", roles: ["team_lead", "admin"] },
 ];
 
@@ -460,7 +460,7 @@ export default function Layout() {
                     setAvailabilityError("");
                     updateAvailability.mutate({ status: "Free", remark: null });
                   }}>
-                    <span className="profile-action-icon profile-action-icon-green"><Icon name="users" size={17} /></span>
+                    <span className="profile-action-icon profile-action-icon-green"><Icon name="activity" size={17} /></span>
                     <span>Mark Free</span>
                   </button>
                 ) : (
@@ -470,7 +470,7 @@ export default function Layout() {
                     setAvailabilityRemark("");
                     setBusyModalOpen(true);
                   }}>
-                    <span className="profile-action-icon profile-action-icon-orange"><Icon name="users" size={17} /></span>
+                    <span className="profile-action-icon profile-action-icon-orange"><Icon name="activity" size={17} /></span>
                     <span>Mark Busy</span>
                   </button>
                 )}
@@ -479,7 +479,9 @@ export default function Layout() {
                     setProfileMenuOpen(false);
                     endBreak.mutate(activeBreak);
                   }}>
-                    <span className="profile-action-icon profile-action-icon-orange"><Icon name="jobs" size={17} /></span>
+                    <span className={`profile-action-icon ${activeBreak.break_type === "Lunch" ? "profile-action-icon-orange" : "profile-action-icon-blue"}`}>
+                      <Icon name={activeBreak.break_type === "Lunch" ? "utensils" : "coffee"} size={17} />
+                    </span>
                     <span>{endBreak.isPending ? "Ending..." : `End ${activeBreak.break_type} Break`}</span>
                   </button>
                 ) : (
@@ -490,7 +492,7 @@ export default function Layout() {
                       setStartRemark("");
                       setBreakToStart("Lunch");
                     }}>
-                      <span className="profile-action-icon profile-action-icon-orange"><Icon name="jobs" size={17} /></span>
+                      <span className="profile-action-icon profile-action-icon-orange"><Icon name="utensils" size={17} /></span>
                       <span>Start Lunch Break</span>
                     </button>
                     <button type="button" role="menuitem" className="profile-menu-action" disabled={activeBreakQuery.isLoading || activeBreakQuery.isError || startBreak.isPending} onClick={() => {
@@ -499,7 +501,7 @@ export default function Layout() {
                       setStartRemark("");
                       setBreakToStart("Tea");
                     }}>
-                      <span className="profile-action-icon profile-action-icon-blue"><Icon name="jobs" size={17} /></span>
+                      <span className="profile-action-icon profile-action-icon-blue"><Icon name="coffee" size={17} /></span>
                       <span>Start Tea Break</span>
                     </button>
                   </>
@@ -510,7 +512,7 @@ export default function Layout() {
                   setFeedbackNotice("");
                   setFeedbackOpen(true);
                 }}>
-                  <span className="profile-action-icon profile-action-icon-blue"><Icon name="logs" size={17} /></span>
+                  <span className="profile-action-icon profile-action-icon-blue"><Icon name="message-square" size={17} /></span>
                   <span>Send Feedback</span>
                 </button>
                 <div className="profile-menu-divider" />
@@ -725,7 +727,7 @@ export default function Layout() {
               end={n.to === "/"}
               className={({ isActive }) => (isActive ? "active" : "")}
             >
-              <Icon name={n.icon} size={18} />
+              <Icon name={n.icon} size={20} />
               {n.label}
             </NavLink>
           ))}

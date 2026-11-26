@@ -15,8 +15,8 @@ import { supabase } from "../lib/supabase";
 const STATUS_COLORS: Record<string, string> = {
   Completed: "var(--zy-blue)",
   Live: "var(--zy-green)",
-  WIP: "#ef4444",
-  "Partially Live": "#8b5cf6",
+  WIP: "var(--danger-text)",
+  "Partially Live": "var(--purple-text)",
   Pending: "var(--err)",
   Other: "var(--muted)",
 };
@@ -74,7 +74,7 @@ function KpiCard({
   label: string;
   value: number | string;
   icon: IconName;
-  tone?: "blue" | "neutral" | "ok" | "warn" | "bad";
+  tone?: "blue" | "neutral" | "ok" | "warn" | "bad" | "purple" | "teal";
   to?: string;
 }) {
   const content = (
@@ -229,11 +229,11 @@ export default function HomePage() {
           </div>
         </div>
         <div className="kpi-row premium-kpi-row" aria-label="Overview metrics">
-          <KpiCard label="Active sites" value={stats.data?.activeSites ?? "..."} icon="sites" tone="blue" to="/sites?status=Active" />
-          <KpiCard label="Total Job" value={stats.data?.totalJobsThisMonth ?? "..."} icon="jobs" tone="neutral" to="/jobs" />
-          <KpiCard label="Total Live" value={stats.data?.completedThisMonth ?? "..."} icon="reports" tone="ok" to="/jobs" />
-          <KpiCard label="Handover pending" value={stats.data?.pendingHandover ?? "..."} icon="jobs" tone="warn" to="/jobs?handover=Pending" />
-          <KpiCard label="Material Status" value={stats.data?.pendingMaterial ?? "..."} icon="devices" tone="bad" to="/reports?tab=hardware&pending=1" />
+          <KpiCard label="Active sites" value={stats.data?.activeSites ?? "..."} icon="building" tone="blue" to="/sites?status=Active" />
+          <KpiCard label="Total Job" value={stats.data?.totalJobsThisMonth ?? "..."} icon="clipboard-list" tone="neutral" to="/jobs" />
+          <KpiCard label="Total Live" value={stats.data?.completedThisMonth ?? "..."} icon="chart" tone="ok" to="/jobs" />
+          <KpiCard label="Handover pending" value={stats.data?.pendingHandover ?? "..."} icon="clipboard-list" tone="warn" to="/jobs?handover=Pending" />
+          <KpiCard label="Material Status" value={stats.data?.pendingMaterial ?? "..."} icon="smartphone" tone="bad" to="/reports?tab=hardware&pending=1" />
         </div>
       </section>
       <section className="dashboard-kpi-group" aria-labelledby="dashboard-people-heading">
@@ -244,11 +244,21 @@ export default function HomePage() {
           </div>
         </div>
         <div className="kpi-row premium-kpi-row" aria-label="People and workload metrics">
-          <KpiCard label="Active Employees" value={stats.data?.activeEmployees ?? "..."} icon="users" tone="ok" to="/users" />
-          <KpiCard label="Logged In Today" value={stats.data?.loggedInToday ?? "..."} icon="logs" tone="blue" />
-          <KpiCard label="Jobs Today" value={stats.data?.jobsToday ?? "..."} icon="jobs" tone="neutral" to="/jobs" />
-          <KpiCard label="Completion Rate" value={stats.isLoading ? "..." : completionRate} icon="reports" tone="ok" to="/jobs" />
-          <KpiCard label="Pending Work" value={stats.data ? stats.data.pendingHandover + stats.data.pendingMaterial : "..."} icon="devices" tone="warn" to="/reports?tab=hardware&pending=1" />
+          <KpiCard label="Active Employees" value={stats.data?.activeEmployees ?? "..."} icon="users" tone="teal" to="/users" />
+          <KpiCard label="Logged In Today" value={stats.data?.loggedInToday ?? "..."} icon="activity" tone="blue" />
+          <KpiCard label="Jobs Today" value={stats.data?.jobsToday ?? "..."} icon="clipboard-list" tone="purple" to="/jobs" />
+          <KpiCard label="Completion Rate" value={stats.isLoading ? "..." : completionRate} icon="chart" tone="ok" to="/jobs" />
+          <KpiCard label="Pending Work" value={stats.data ? stats.data.pendingHandover + stats.data.pendingMaterial : "..."} icon="clipboard-list" tone="warn" to="/reports?tab=hardware&pending=1" />
+        </div>
+      </section>
+      <section className="card quick-actions">
+        <div className="section-heading"><div><p className="dashboard-eyebrow">Shortcuts</p><h2>Quick Actions</h2></div></div>
+        <div className="quick-action-grid">
+          <Link className="quick-action" to="/jobs"><span><Icon name="plus" /></span><strong>New Job</strong></Link>
+          <Link className="quick-action" to="/sites"><span><Icon name="sites" /></span><strong>Add Site</strong></Link>
+          {(profile.role === "team_lead" || profile.role === "admin") && (
+            <Link className="quick-action" to="/reports"><span><Icon name="reports" /></span><strong>View Reports</strong></Link>
+          )}
         </div>
       </section>
 
@@ -257,10 +267,10 @@ export default function HomePage() {
           <div className="section-heading"><div><p className="dashboard-eyebrow">Operations</p><h2>Today’s Work Summary</h2></div></div>
           <div className="summary-rows">
             {[
-              { label: "Jobs created today", count: stats.data?.jobsToday, icon: "plus" as IconName, to: "/jobs" },
-              { label: "Jobs completed today", count: stats.data?.completedToday, icon: "reports" as IconName, to: "/jobs?finalStatus=Completed" },
-              { label: "Live jobs today", count: stats.data?.liveToday, icon: "jobs" as IconName, to: "/jobs?finalStatus=Live" },
-              { label: "Pending jobs today", count: stats.data?.pendingToday, icon: "empty" as IconName, to: "/jobs?finalStatus=Pending" },
+              { label: "Jobs created today", count: stats.data?.jobsToday, icon: "clipboard-list" as IconName, to: "/jobs" },
+              { label: "Jobs completed today", count: stats.data?.completedToday, icon: "chart" as IconName, to: "/jobs?finalStatus=Completed" },
+              { label: "Live jobs today", count: stats.data?.liveToday, icon: "clipboard-list" as IconName, to: "/jobs?finalStatus=Live" },
+              { label: "Pending jobs today", count: stats.data?.pendingToday, icon: "list" as IconName, to: "/jobs?finalStatus=Pending" },
             ].map((row) => (
               <Link className="summary-row" to={row.to} key={row.label}>
                 <span className="summary-icon"><Icon name={row.icon} size={18} /></span>
@@ -361,16 +371,6 @@ export default function HomePage() {
         )}
       </section>
 
-      <section className="card quick-actions">
-        <div className="section-heading"><div><p className="dashboard-eyebrow">Shortcuts</p><h2>Quick Actions</h2></div></div>
-        <div className="quick-action-grid">
-          <Link className="quick-action" to="/jobs"><span><Icon name="plus" /></span><strong>New Job</strong></Link>
-          <Link className="quick-action" to="/sites"><span><Icon name="sites" /></span><strong>Add Site</strong></Link>
-          {(profile.role === "team_lead" || profile.role === "admin") && (
-            <Link className="quick-action" to="/reports"><span><Icon name="reports" /></span><strong>View Reports</strong></Link>
-          )}
-        </div>
-      </section>
     </div>
   );
 }
