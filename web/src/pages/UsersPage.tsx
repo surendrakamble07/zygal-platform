@@ -188,6 +188,37 @@ export default function UsersPage() {
     },
   })
 
+  const employeeProjectNames = useQuery({
+    queryKey: ['employee-project-names', employees.data?.rows.map((row) => row.id).join(',')],
+    enabled: !!employees.data?.rows.length,
+    queryFn: async () => {
+      const profileIds = employees.data?.rows.map((row) => row.id) ?? []
+      if (!profileIds.length) return {} as Record<string, string[]>
+
+      const { data: assignments, error: assignmentsError } = await supabase
+        .from('profile_projects')
+        .select('profile_id, project_id')
+        .in('profile_id', profileIds)
+      if (assignmentsError) throw assignmentsError
+
+      const projectIds = [...new Set((assignments ?? []).map((row) => row.project_id as string))]
+      if (!projectIds.length) return {} as Record<string, string[]>
+
+      const { data: projects, error: projectsError } = await supabase
+        .from('projects')
+        .select('id, name')
+        .in('id', projectIds)
+      if (projectsError) throw projectsError
+      const namesByProject = new Map((projects ?? []).map((project) => [project.id as string, project.name as string]))
+      const namesByProfile: Record<string, string[]> = {}
+      for (const assignment of assignments ?? []) {
+        const name = namesByProject.get(assignment.project_id as string)
+        if (name) (namesByProfile[assignment.profile_id as string] ??= []).push(name)
+      }
+      return namesByProfile
+    },
+  })
+
   const activeEmployeeCount = useQuery({
     queryKey: ['active-employee-count', isAdmin],
     queryFn: async () => {
@@ -293,14 +324,15 @@ export default function UsersPage() {
                 <th>Mobile number</th>
                 <th>Role</th>
                 <th>Job title</th>
+                <th>Projects</th>
                 <th>Status</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {employees.isLoading && <TableSkeleton columns={7} />}
+              {employees.isLoading && <TableSkeleton columns={8} />}
               {!employees.isLoading && rows.length === 0 && (
-                <TableEmptyState columns={7} message="No employees match these filters." />
+                <TableEmptyState columns={8} message="No employees match these filters." />
               )}
               {rows.map((u) => (
                 <tr key={u.id}>
@@ -309,6 +341,13 @@ export default function UsersPage() {
                   <td>{u.phone ?? '-'}</td>
                   <td>{ROLE_LABEL[u.role]}</td>
                   <td>{u.job_title ?? '-'}</td>
+                  <td>
+                    {employeeProjectNames.isError
+                      ? <span className="hint bad">Could not load projects</span>
+                      : employeeProjectNames.isLoading
+                        ? 'Loading...'
+                        : employeeProjectNames.data?.[u.id]?.join(', ') || '-'}
+                  </td>
                   <td><StatusBadge status={u.is_active ? 'Active' : 'Inactive'} /></td>
                   <td className="row-actions">
                     {isAdmin && (

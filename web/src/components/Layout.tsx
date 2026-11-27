@@ -10,6 +10,7 @@ import {
   type AvailabilityValue,
 } from "../lib/availability";
 import Avatar from "./Avatar";
+import TicketNotifications from "./TicketNotifications";
 
 type BreakType = "Lunch" | "Tea";
 
@@ -37,6 +38,7 @@ const NAV: NavItem[] = [
   { to: "/sites", label: "Sites", icon: "building" },
   { to: "/devices", label: "SIM Cards", icon: "smartphone" },
   { to: "/jobs", label: "Jobs", icon: "clipboard-list" },
+  { to: "/tickets", label: "Tickets", icon: "clipboard-list" },
   { to: "/notes", label: "My Notes", icon: "note" },
   { to: "/my-activity", label: "My Activity", icon: "activity" },
   {
@@ -352,6 +354,7 @@ export default function Layout() {
           </div>
         </div>
         <div className="topbar-right">
+          <TicketNotifications profileId={profile.id} />
           <a
             href={`${import.meta.env.BASE_URL}ZYGAL_User_Guide.pdf`}
             target="_blank"

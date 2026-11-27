@@ -21,6 +21,7 @@ export type IconName =
   | 'plus'
   | 'empty'
   | 'logout'
+  | 'bell'
 
 interface Props {
   name: IconName
@@ -51,6 +52,7 @@ const PATHS: Record<IconName, string> = {
   plus: 'M12 5v14m-7-7h14',
   empty: 'M4 5h16v14H4zM8 9h8m-8 4h5',
   logout: 'M10 17l5-5-5-5m5 5H3m9-8h8v16h-8',
+  bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9m-8 12a2 2 0 0 0 4 0',
 }
 
 export default function Icon({ name, size = 20, className }: Props) {

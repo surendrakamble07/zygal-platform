@@ -1,5 +1,8 @@
 ﻿import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useAuth } from '../auth/auth-context'
+import { supabase } from '../lib/supabase'
+import { useProjects } from '../lib/queries'
 import { callProvision } from '../lib/user-queries'
 import type { EmployeeRow, Role } from '../lib/user-types'
 
@@ -27,24 +30,31 @@ const PAGE_OPTIONS = [
 ] as const
 
 export default function UserForm({ employee, onClose }: Props) {
+  const { profile } = useAuth()
   const qc = useQueryClient()
+  const projects = useProjects()
+  const authorizedProjectQuery = useQuery({
+    queryKey: ['profile-projects', employee?.id],
+    enabled: profile?.role === 'admin' && !!employee?.id,
+    queryFn: async () => {
+      if (!employee?.id) return []
+      const { data, error } = await supabase
+        .from('profile_projects')
+        .select('project_id')
+        .eq('profile_id', employee.id)
+      if (error) throw error
+      return (data ?? []).map((row) => row.project_id as string)
+    },
+  })
   const [email, setEmail] = useState(employee?.email ?? '')
   const [fullName, setFullName] = useState(employee?.full_name ?? '')
   const [phone, setPhone] = useState(employee?.phone ?? '')
   const [role, setRole] = useState<Role>(employee?.role ?? 'support')
   const [jobTitle, setJobTitle] = useState(employee?.job_title ?? '')
   const [allowedPages, setAllowedPages] = useState<string[]>(() => employee?.allowed_pages ?? ['dashboard'])
+  const [authorizedProjects, setAuthorizedProjects] = useState<string[] | null>(null)
   const [error, setError] = useState('')
-
-  useEffect(() => {
-    if (employee?.allowed_pages) {
-      setAllowedPages(employee.allowed_pages)
-      return
-    }
-    if (role === 'other') {
-      setAllowedPages((current) => (current.length ? current : ['dashboard']))
-    }
-  }, [employee, role])
+  const selectedProjectIds = authorizedProjects ?? authorizedProjectQuery.data ?? []
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -83,10 +93,41 @@ export default function UserForm({ employee, onClose }: Props) {
         payload.allowed_pages = allowedPages
       }
 
-      return callProvision(payload)
+      const result = await callProvision<{ ok: boolean; user_id?: string }>(payload)
+      if (profile?.role === 'admin') {
+        const profileId = employee?.id ?? result.user_id
+        if (!profileId) throw new Error('The employee was saved, but their profile ID was not returned.')
+
+        const { data: currentRows, error: currentError } = await supabase
+          .from('profile_projects')
+          .select('project_id')
+          .eq('profile_id', profileId)
+        if (currentError) throw currentError
+
+        const currentIds = (currentRows ?? []).map((row) => row.project_id as string)
+        const removedIds = currentIds.filter((projectId) => !selectedProjectIds.includes(projectId))
+        const addedIds = selectedProjectIds.filter((projectId) => !currentIds.includes(projectId))
+        if (removedIds.length) {
+          const { error: deleteError } = await supabase
+            .from('profile_projects')
+            .delete()
+            .eq('profile_id', profileId)
+            .in('project_id', removedIds)
+          if (deleteError) throw deleteError
+        }
+        if (addedIds.length) {
+          const { error: insertError } = await supabase
+            .from('profile_projects')
+            .insert(addedIds.map((project_id) => ({ profile_id: profileId, project_id })))
+          if (insertError) throw insertError
+        }
+      }
+      return result
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['employees'] })
+      void qc.invalidateQueries({ queryKey: ['profile-projects'] })
+      void qc.invalidateQueries({ queryKey: ['employee-project-names'] })
       onClose()
     },
     onError: (err: Error) => setError(err.message),
@@ -153,7 +194,11 @@ export default function UserForm({ employee, onClose }: Props) {
 
           <label>
             <span className='field-caption'>Role <span className='field-required'>*</span></span>
-            <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
+            <select value={role} onChange={(e) => {
+              const nextRole = e.target.value as Role
+              setRole(nextRole)
+              if (nextRole === 'other' && allowedPages.length === 0) setAllowedPages(['dashboard'])
+            }}>
               {ROLE_OPTIONS.map((r) => (
                 <option key={r.value} value={r.value}>
                   {r.label}
@@ -185,13 +230,48 @@ export default function UserForm({ employee, onClose }: Props) {
             </div>
           )}
 
+          {profile?.role === 'admin' && (
+            <div className='full'>
+              <span className='field-caption'>Authorized Projects</span>
+              {projects.isLoading || authorizedProjectQuery.isLoading ? (
+                <span className='muted small'>Loading projects...</span>
+              ) : projects.isError || authorizedProjectQuery.isError ? (
+                <div className='banner error' role='alert'>Could not load authorized projects.</div>
+              ) : projects.data?.length ? (
+                <div className='check-list'>
+                  {projects.data.map((project) => (
+                    <label key={project.id} className='check-item'>
+                      <input
+                        type='checkbox'
+                        checked={selectedProjectIds.includes(project.id)}
+                        onChange={() => setAuthorizedProjects((current) => {
+                          const currentProjects = current ?? authorizedProjectQuery.data ?? []
+                          return currentProjects.includes(project.id)
+                            ? currentProjects.filter((projectId) => projectId !== project.id)
+                            : [...currentProjects, project.id]
+                        },
+                        )}
+                      />
+                      <span>{project.name}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <span className='muted small'>No projects available.</span>
+              )}
+            </div>
+          )}
+
           {error && <div className='banner error full form-error' role='alert'>{error}</div>}
 
           <div className='actions full'>
             <button type='button' className='secondary' onClick={onClose} disabled={save.isPending}>
               Cancel
             </button>
-            <button type='submit' disabled={save.isPending}>
+            <button
+              type='submit'
+              disabled={save.isPending || (profile?.role === 'admin' && (projects.isLoading || authorizedProjectQuery.isLoading || projects.isError || authorizedProjectQuery.isError))}
+            >
               {save.isPending ? 'Saving...' : employee ? 'Save changes' : 'Create employee'}
             </button>
           </div>

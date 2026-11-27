@@ -15,6 +15,8 @@ import ReportsPage from './pages/ReportsPage'
 import LogsPage from './pages/LogsPage'
 import NotesPage from './pages/NotesPage'
 import MyActivityPage from './pages/MyActivityPage'
+import TicketsPage from './pages/TicketsPage'
+import TicketDetailPage from './pages/TicketDetailPage'
 
 function Protected({ children }: { children: ReactNode }) {
   const { status } = useAuth()
@@ -84,6 +86,8 @@ export default function App() {
             <Route path="devices" element={<DevicesPage />} />
             <Route path="jobs" element={<JobsPage />} />
             <Route path="jobs/:jobId" element={<JobDetail />} />
+            <Route path="tickets" element={<TicketsPage />} />
+            <Route path="tickets/:ticketId" element={<TicketDetailPage />} />
             <Route path="notes" element={<NotesPage />} />
             <Route path="my-activity" element={<MyActivityPage />} />
             <Route
