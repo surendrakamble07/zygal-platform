@@ -16,14 +16,12 @@ export async function insertTicketNotifications(
 ) {
   const uniqueRecipients = [...new Set(recipientIds)]
   if (!uniqueRecipients.length) return
-  const { error } = await supabase.from('ticket_notifications').insert(
-    uniqueRecipients.map((recipient_id) => ({
-      ticket_id: ticketId,
-      recipient_id,
-      type,
-      message,
-    })),
-  )
+  const { error } = await supabase.rpc('create_ticket_notifications', {
+    p_ticket_id: ticketId,
+    p_type: type,
+    p_message: message,
+    p_recipient_ids: uniqueRecipients,
+  })
   if (error) throw error
 }
 

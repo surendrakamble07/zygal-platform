@@ -10,6 +10,7 @@ import {
   fetchJobReportForExport,
   fetchMaterialReport,
   JOB_REPORT_EXPORT_HEADERS,
+  useEmployeeTicketProductivity,
   useEmployeeProductivity,
   useJobReport,
   useMaterialReport,
@@ -435,6 +436,8 @@ function EmployeeProductivityTab() {
   const [dateTo, setDateTo] = useState(currentMonth.to)
   const report = useEmployeeProductivity(dateFrom, dateTo)
   const rows = report.data ?? []
+  const ticketProductivity = useEmployeeTicketProductivity(rows.map((row) => row.profile_id))
+  const ticketsByProfile = new Map((ticketProductivity.data ?? []).map((row) => [row.profile_id, row]))
 
   function exportCsv() {
     const exportRows = rows.map((row) => ({
@@ -443,6 +446,11 @@ function EmployeeProductivityTab() {
       'Account Status': row.is_active ? 'Active' : 'Inactive',
       'Jobs Created': row.jobs_created,
       'Jobs Completed / Live': row.completed_jobs,
+      'Tickets In Progress': ticketsByProfile.get(row.profile_id)?.in_progress ?? 0,
+      'Tickets Pending Review': ticketsByProfile.get(row.profile_id)?.pending_review ?? 0,
+      'Tickets Reopened': ticketsByProfile.get(row.profile_id)?.reopened ?? 0,
+      'Completed Tickets': ticketsByProfile.get(row.profile_id)?.completed_tickets ?? 0,
+      'Contribution-weighted Completions': ticketsByProfile.get(row.profile_id)?.contribution_weighted_completions ?? 0,
       'Active Time': row.active_time,
       'Login Days': row.login_days,
     }))
@@ -458,11 +466,20 @@ function EmployeeProductivityTab() {
 
       <div className="head-row">
         <span className="muted small">{rows.length} employee{rows.length === 1 ? '' : 's'}</span>
-        <button className="secondary" disabled={rows.length === 0} onClick={exportCsv}>
+        <button
+          className="secondary"
+          disabled={rows.length === 0 || ticketProductivity.isLoading || ticketProductivity.isError}
+          onClick={exportCsv}
+        >
           Export to CSV
         </button>
       </div>
       {report.isError && <div className="banner error">Could not load employee productivity. Please refresh and try again.</div>}
+      {ticketProductivity.isError && (
+        <div className="banner error" role="alert">
+          Could not load employee ticket productivity: {ticketProductivity.error.message}
+        </div>
+      )}
 
       <div className="table-wrap">
         <table>
@@ -470,12 +487,15 @@ function EmployeeProductivityTab() {
             <tr>
               <th>Employee</th><th>Role</th><th>Account status</th>
               <th className="numeric">Jobs created</th><th className="numeric">Jobs completed / live</th>
+              <th className="numeric">Tickets in progress</th><th className="numeric">Pending review</th>
+              <th className="numeric">Reopened</th><th className="numeric">Completed tickets</th>
+              <th className="numeric">Contribution-weighted completions</th>
               <th className="numeric">Active time</th><th className="numeric">Login days</th>
             </tr>
           </thead>
           <tbody>
-            {report.isLoading && <TableSkeleton columns={7} />}
-            {!report.isLoading && rows.length === 0 && <TableEmptyState columns={7} message="No employees found." />}
+            {report.isLoading && <TableSkeleton columns={12} />}
+            {!report.isLoading && rows.length === 0 && <TableEmptyState columns={12} message="No employees found." />}
             {rows.map((row) => (
               <tr key={row.profile_id}>
                 <td><span className="person-cell"><Avatar name={row.full_name} />{row.full_name}</span></td>
@@ -483,6 +503,11 @@ function EmployeeProductivityTab() {
                 <td><StatusBadge status={row.is_active ? 'Active' : 'Inactive'} /></td>
                 <td className="numeric">{row.jobs_created}</td>
                 <td className="numeric">{row.completed_jobs}</td>
+                <td className="numeric">{ticketProductivity.isLoading ? '...' : ticketsByProfile.get(row.profile_id)?.in_progress ?? 0}</td>
+                <td className="numeric">{ticketProductivity.isLoading ? '...' : ticketsByProfile.get(row.profile_id)?.pending_review ?? 0}</td>
+                <td className="numeric">{ticketProductivity.isLoading ? '...' : ticketsByProfile.get(row.profile_id)?.reopened ?? 0}</td>
+                <td className="numeric">{ticketProductivity.isLoading ? '...' : ticketsByProfile.get(row.profile_id)?.completed_tickets ?? 0}</td>
+                <td className="numeric">{ticketProductivity.isLoading ? '...' : ticketsByProfile.get(row.profile_id)?.contribution_weighted_completions ?? 0}</td>
                 <td className="numeric">{row.active_time}</td>
                 <td className="numeric">{row.login_days}</td>
               </tr>

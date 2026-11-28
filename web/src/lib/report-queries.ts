@@ -365,6 +365,38 @@ export function useMyProductivity(profileId: string | null, dateFrom: string, da
   })
 }
 
+export interface EmployeeTicketProductivityRow {
+  profile_id: string
+  in_progress: number
+  pending_review: number
+  reopened: number
+  completed_tickets: number
+  contribution_weighted_completions: number
+}
+
+export function useEmployeeTicketProductivity(profileIds: string[]) {
+  const uniqueProfileIds = [...new Set(profileIds)].sort()
+  return useQuery({
+    queryKey: ['employee-ticket-productivity', uniqueProfileIds],
+    enabled: uniqueProfileIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('v_employee_ticket_productivity')
+        .select('profile_id, in_progress, pending_review, reopened, completed_tickets, contribution_weighted_completions')
+        .in('profile_id', uniqueProfileIds)
+      if (error) throw error
+      return (data ?? []).map((row) => ({
+        profile_id: row.profile_id as string,
+        in_progress: Number(row.in_progress),
+        pending_review: Number(row.pending_review),
+        reopened: Number(row.reopened),
+        completed_tickets: Number(row.completed_tickets),
+        contribution_weighted_completions: Number(row.contribution_weighted_completions),
+      })) as EmployeeTicketProductivityRow[]
+    },
+  })
+}
+
 export async function fetchEmployeeProductivity(
   dateFrom: string,
   dateTo: string,

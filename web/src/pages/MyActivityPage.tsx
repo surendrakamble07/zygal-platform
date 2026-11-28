@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../auth/auth-context'
-import { useMyProductivity } from '../lib/report-queries'
+import { useEmployeeTicketProductivity, useMyProductivity } from '../lib/report-queries'
 import Icon from '../components/Icon'
 
 type DateRangePreset = 'this-month' | 'last-month' | 'custom'
@@ -27,6 +27,8 @@ export default function MyActivityPage() {
   const [dates, setDates] = useState(() => monthRange(0))
   const activity = useMyProductivity(profile?.id ?? null, dates.from, dates.to)
   const row = activity.data?.[0]
+  const ticketActivity = useEmployeeTicketProductivity(profile?.id ? [profile.id] : [])
+  const ticketRow = ticketActivity.data?.[0]
 
   function changePreset(nextPreset: DateRangePreset) {
     setPreset(nextPreset)
@@ -104,6 +106,55 @@ export default function MyActivityPage() {
             <div className="kpi-label">Hours logged in</div>
           </div>
           <div className="kpi-number">{activity.isLoading ? '...' : row?.active_time ?? '-'}</div>
+        </article>
+      </div>
+
+      <div className="head-row">
+        <h3>Tickets</h3>
+        <span className="muted small">All-time ticket activity</span>
+      </div>
+      {ticketActivity.isError && (
+        <div className="banner error" role="alert">
+          Could not load your ticket productivity: {ticketActivity.error.message}
+        </div>
+      )}
+      <div className="project-dashboard-grid" aria-live="polite">
+        <article className="kpi">
+          <div className="kpi-heading">
+            <span className="kpi-icon kpi-icon-blue"><Icon name="clipboard-list" size={20} /></span>
+            <div className="kpi-label">In Progress</div>
+          </div>
+          <div className="kpi-number">{ticketActivity.isLoading ? '...' : ticketRow?.in_progress ?? 0}</div>
+        </article>
+        <article className="kpi">
+          <div className="kpi-heading">
+            <span className="kpi-icon kpi-icon-neutral"><Icon name="reports" size={20} /></span>
+            <div className="kpi-label">Pending Review</div>
+          </div>
+          <div className="kpi-number">{ticketActivity.isLoading ? '...' : ticketRow?.pending_review ?? 0}</div>
+        </article>
+        <article className="kpi">
+          <div className="kpi-heading">
+            <span className="kpi-icon kpi-icon-neutral"><Icon name="logs" size={20} /></span>
+            <div className="kpi-label">Reopened</div>
+          </div>
+          <div className="kpi-number">{ticketActivity.isLoading ? '...' : ticketRow?.reopened ?? 0}</div>
+        </article>
+        <article className="kpi">
+          <div className="kpi-heading">
+            <span className="kpi-icon kpi-icon-ok"><Icon name="reports" size={20} /></span>
+            <div className="kpi-label">Completed Tickets</div>
+          </div>
+          <div className="kpi-number">{ticketActivity.isLoading ? '...' : ticketRow?.completed_tickets ?? 0}</div>
+        </article>
+        <article className="kpi">
+          <div className="kpi-heading">
+            <span className="kpi-icon kpi-icon-blue"><Icon name="activity" size={20} /></span>
+            <div className="kpi-label">Contribution-weighted Completions</div>
+          </div>
+          <div className="kpi-number">
+            {ticketActivity.isLoading ? '...' : ticketRow?.contribution_weighted_completions ?? 0}
+          </div>
         </article>
       </div>
     </section>

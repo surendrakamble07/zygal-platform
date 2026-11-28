@@ -29,6 +29,15 @@ interface AssignmentRecord {
   full_name: string
 }
 
+interface TicketReviewRecord {
+  id: number
+  reviewed_by: string | null
+  action: string
+  remark: string | null
+  created_at: string
+  reviewer_name: string
+}
+
 interface WorkLogRecord {
   id: string
   author_id: string | null
@@ -87,6 +96,8 @@ export default function TicketDetailPage() {
   const [workLogNote, setWorkLogNote] = useState('')
   const [comment, setComment] = useState('')
   const [cancelReason, setCancelReason] = useState('')
+  const [reopenRemark, setReopenRemark] = useState('')
+  const [isReopenModalOpen, setIsReopenModalOpen] = useState(false)
   const [statusError, setStatusError] = useState('')
   const [formError, setFormError] = useState('')
   const [notificationError, setNotificationError] = useState('')
@@ -157,6 +168,29 @@ export default function TicketDetailPage() {
         is_current: row.is_current as boolean,
         full_name: names.get(row.assigned_to as string) ?? 'Unknown employee',
       })) as AssignmentRecord[]
+    },
+  })
+  const reviewHistory = useQuery({
+    queryKey: ['ticket-reviews', ticketId],
+    enabled: !!ticket.data,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('ticket_reviews')
+        .select('id, reviewed_by, action, remark, created_at')
+        .eq('ticket_id', ticket.data!.id)
+        .order('created_at', { ascending: true })
+      if (error) throw error
+      const rows = data ?? []
+      const names = await loadNames(rows.map((row) => row.reviewed_by as string | null))
+      return rows.map((row) => ({
+        ...row,
+        id: row.id as number,
+        reviewed_by: row.reviewed_by as string | null,
+        action: row.action as string,
+        remark: row.remark as string | null,
+        created_at: row.created_at as string,
+        reviewer_name: names.get(row.reviewed_by as string) ?? 'Unknown reviewer',
+      })) as TicketReviewRecord[]
     },
   })
   const currentAssignment = assignmentHistory.data?.find((assignment) => assignment.is_current)
@@ -313,13 +347,17 @@ export default function TicketDetailPage() {
     },
   })
 
-  const refreshTicket = () => {
-    void queryClient.invalidateQueries({ queryKey: ['ticket', ticketId] })
-    void queryClient.invalidateQueries({ queryKey: ['project-tickets'] })
-    void queryClient.invalidateQueries({ queryKey: ['ticket-assignment-history', ticketId] })
-    void queryClient.invalidateQueries({ queryKey: ['ticket-work-logs', ticketId] })
-    void queryClient.invalidateQueries({ queryKey: ['ticket-comments', ticketId] })
-    void queryClient.invalidateQueries({ queryKey: ['ticket-attachments', ticketId] })
+  const refreshTicket = () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['ticket', ticketId] }),
+    queryClient.invalidateQueries({ queryKey: ['project-tickets'] }),
+    queryClient.invalidateQueries({ queryKey: ['ticket-assignment-history', ticketId] }),
+    queryClient.invalidateQueries({ queryKey: ['ticket-reviews', ticketId] }),
+    queryClient.invalidateQueries({ queryKey: ['ticket-work-logs', ticketId] }),
+    queryClient.invalidateQueries({ queryKey: ['ticket-comments', ticketId] }),
+    queryClient.invalidateQueries({ queryKey: ['ticket-attachments', ticketId] }),
+  ]).then(() => undefined)
+  const refreshMyTicketNotifications = () => {
+    if (profile?.id) invalidateTicketNotificationQueries(queryClient, [profile.id])
   }
   const addWorkLog = useMutation({
     mutationFn: async () => {
@@ -334,7 +372,7 @@ export default function TicketDetailPage() {
     onSuccess: () => {
       setWorkLogNote('')
       setFormError('')
-      refreshTicket()
+      void refreshTicket()
     },
     onError: (error: Error) => setFormError(error.message),
   })
@@ -350,7 +388,7 @@ export default function TicketDetailPage() {
     onSuccess: async () => {
       setComment('')
       setFormError('')
-      refreshTicket()
+      void refreshTicket()
       try {
         if (ticket.data && profile?.id) {
           const recipients = currentAssignment?.assigned_to === profile.id
@@ -397,52 +435,71 @@ export default function TicketDetailPage() {
     },
     onSuccess: () => {
       setFormError('')
-      refreshTicket()
+      void refreshTicket()
     },
     onError: (error: Error) => setFormError(error.message),
   })
-  const statusAction = useMutation({
-    mutationFn: async ({ action, status, reason }: { action: string; status: string; reason?: string }) => {
+  const lifecycleAction = useMutation({
+    mutationFn: async ({ action, remark }: { action: 'Submit' | 'Close' | 'Reopen'; remark?: string }) => {
       if (!ticket.data) throw new Error('Ticket is unavailable.')
-      const { error: reviewError } = await supabase.from('ticket_reviews').insert({
-        ticket_id: ticket.data.id,
-        action,
-        remark: reason ?? null,
-      })
-      if (reviewError) throw reviewError
-      const patch = action === 'Cancelled'
-        ? { status, cancel_reason: reason, cancelled_at: new Date().toISOString() }
-        : { status }
-      const { error: updateError } = await supabase.from('tickets').update(patch).eq('id', ticket.data.id)
-      if (updateError) throw updateError
+      if (action === 'Submit') {
+        const { error } = await supabase.rpc('submit_ticket', { p_ticket_id: ticket.data.id })
+        if (error) throw error
+      } else if (action === 'Close') {
+        const { error } = await supabase.rpc('close_ticket', { p_ticket_id: ticket.data.id })
+        if (error) throw error
+      } else {
+        if (!remark?.trim()) throw new Error('Enter a remark before reopening this ticket.')
+        const { error } = await supabase.rpc('reopen_ticket', {
+          p_ticket_id: ticket.data.id,
+          p_remark: remark.trim(),
+        })
+        if (error) throw error
+      }
     },
     onSuccess: async (_data, variables) => {
       setStatusError('')
-      setCancelReason('')
-      refreshTicket()
-      try {
-        if (ticket.data) {
-          let recipients: string[] = []
-          if (variables.action === 'Submitted') {
-            recipients = await getProjectTeamLeadIds(ticket.data.project_id)
-          } else if (['Approved', 'Reopened'].includes(variables.action) && currentAssignment?.assigned_to) {
-            recipients = [currentAssignment.assigned_to]
-          }
-          const recipientsToNotify = recipients.filter((recipientId) => recipientId !== profile?.id)
-          await insertTicketNotifications(
-            ticket.data.id,
-            variables.action,
-            `Ticket for ${site.data?.branch_name || site.data?.branch_code || ticket.data.id} was ${variables.action.toLowerCase()}.`,
-            recipientsToNotify,
-          )
-          invalidateTicketNotificationQueries(queryClient, recipientsToNotify)
-        }
-        setNotificationError('')
-      } catch (error) {
-        setNotificationError(`Status updated, but the notification could not be sent: ${error instanceof Error ? error.message : String(error)}`)
+      if (variables.action === 'Reopen') {
+        setReopenRemark('')
+        setIsReopenModalOpen(false)
+      }
+      await refreshTicket()
+    },
+    onError: async (error: Error, variables) => {
+      setStatusError(error.message)
+      if (error.message.includes('This ticket was already closed or reopened by someone else. Refresh to see the latest status.')) {
+        await refreshTicket()
+        if (variables.action === 'Reopen') setIsReopenModalOpen(false)
       }
     },
+    onSettled: () => refreshMyTicketNotifications(),
+  })
+  const statusAction = useMutation({
+    mutationFn: async ({ reason }: { reason: string }) => {
+      if (!ticket.data) throw new Error('Ticket is unavailable.')
+      const { error: reviewError } = await supabase.from('ticket_reviews').insert({
+        ticket_id: ticket.data.id,
+        action: 'Cancelled',
+        remark: reason,
+      })
+      if (reviewError) throw reviewError
+      const { error: updateError } = await supabase
+        .from('tickets')
+        .update({
+          status: 'Cancelled',
+          cancel_reason: reason,
+          cancelled_at: new Date().toISOString(),
+        })
+        .eq('id', ticket.data.id)
+      if (updateError) throw updateError
+    },
+    onSuccess: async () => {
+      setStatusError('')
+      setCancelReason('')
+      await refreshTicket()
+    },
     onError: (error: Error) => setStatusError(error.message),
+    onSettled: () => refreshMyTicketNotifications(),
   })
   const saveContributions = useMutation({
     mutationFn: async () => {
@@ -497,6 +554,7 @@ export default function TicketDetailPage() {
         <p className="muted small">Created {formatTimestamp(ticket.data.created_at)}</p>
         {formError && <div className="banner error" role="alert">{formError}</div>}
         {notificationError && <div className="banner error" role="alert">{notificationError}</div>}
+        {statusError && !isReopenModalOpen && <div className="banner error" role="alert">{statusError}</div>}
         {projectAccess.isError && <div className="banner error" role="alert">Could not verify project access: {projectAccess.error.message}</div>}
         {site.isError ? <div className="banner error" role="alert">Could not load site: {site.error.message}</div> : (
           <dl className="ticket-site-info">
@@ -526,6 +584,22 @@ export default function TicketDetailPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>Review history</h2>
+        {reviewHistory.isError && <div className="banner error" role="alert">Could not load review history: {reviewHistory.error.message}</div>}
+        <div className="ticket-entry-list">
+          {reviewHistory.data?.map((entry) => (
+            <article className="ticket-entry" key={entry.id}>
+              <div><strong>{entry.action} · {entry.reviewer_name}</strong><time>{formatTimestamp(entry.created_at)}</time></div>
+              <p>{entry.remark || 'No remark.'}</p>
+            </article>
+          ))}
+          {!reviewHistory.isLoading && !reviewHistory.isError && reviewHistory.data?.length === 0 && (
+            <p className="muted small">No review history.</p>
+          )}
         </div>
       </section>
 
@@ -602,13 +676,36 @@ export default function TicketDetailPage() {
       {(canSubmit || canReview || canCancel) && (
         <section className="card">
           <h2>Status actions</h2>
-          {statusError && <div className="banner error" role="alert">{statusError}</div>}
           <div className="actions">
-            {canSubmit && <button type="button" disabled={statusAction.isPending} onClick={() => statusAction.mutate({ action: 'Submitted', status: 'Submitted' })}>Submit for review</button>}
+            {canSubmit && (
+              <button
+                type="button"
+                disabled={lifecycleAction.isPending}
+                onClick={() => lifecycleAction.mutate({ action: 'Submit' })}
+              >
+                {lifecycleAction.isPending ? 'Submitting...' : 'Submit for Review'}
+              </button>
+            )}
             {canReview && (
               <>
-                <button type="button" disabled={statusAction.isPending} onClick={() => statusAction.mutate({ action: 'Approved', status: 'Approved' })}>Approve</button>
-                <button type="button" className="secondary" disabled={statusAction.isPending} onClick={() => statusAction.mutate({ action: 'Reopened', status: 'Reopened' })}>Reopen</button>
+                <button
+                  type="button"
+                  disabled={lifecycleAction.isPending}
+                  onClick={() => lifecycleAction.mutate({ action: 'Close' })}
+                >
+                  {lifecycleAction.isPending ? 'Closing...' : 'Close Ticket'}
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={lifecycleAction.isPending}
+                  onClick={() => {
+                    setStatusError('')
+                    setIsReopenModalOpen(true)
+                  }}
+                >
+                  Reopen Ticket
+                </button>
               </>
             )}
 
@@ -620,7 +717,7 @@ export default function TicketDetailPage() {
                 setStatusError('Enter a cancellation reason.')
                 return
               }
-              statusAction.mutate({ action: 'Cancelled', status: 'Cancelled', reason: cancelReason.trim() })
+              statusAction.mutate({ reason: cancelReason.trim() })
             }}>
               <label className="full">
                 <span className="field-caption">Cancellation reason</span>
@@ -632,6 +729,43 @@ export default function TicketDetailPage() {
             </form>
           )}
         </section>
+      )}
+
+      {isReopenModalOpen && (
+        <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !lifecycleAction.isPending && setIsReopenModalOpen(false)}>
+          <form
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reopen-ticket-title"
+            onSubmit={(event) => {
+              event.preventDefault()
+              lifecycleAction.mutate({ action: 'Reopen', remark: reopenRemark.trim() })
+            }}
+          >
+            <h2 id="reopen-ticket-title">Reopen ticket</h2>
+            <p className="muted small">Add a remark explaining why this ticket is being returned to the employee.</p>
+            {statusError && <div className="banner error" role="alert">{statusError}</div>}
+            <label>
+              <span className="field-caption">Remark</span>
+              <textarea
+                autoFocus
+                required
+                rows={4}
+                value={reopenRemark}
+                onChange={(event) => setReopenRemark(event.target.value)}
+              />
+            </label>
+            <div className="actions">
+              <button type="button" className="secondary" disabled={lifecycleAction.isPending} onClick={() => setIsReopenModalOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" disabled={lifecycleAction.isPending || !reopenRemark.trim()}>
+                {lifecycleAction.isPending ? 'Reopening...' : 'Reopen Ticket'}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
       {canManageProject && (
